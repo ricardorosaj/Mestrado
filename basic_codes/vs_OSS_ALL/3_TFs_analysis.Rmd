@@ -1,0 +1,1047 @@
+---
+title: "3_Emergent_analysis"
+output: html_document
+date: '2022-10-22'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE, warning=FALSEs}
+library(affy)
+library(tidyr)
+library(ggplot2)
+library(pheatmap)
+library(dplyr)
+library(viridis)
+library(limma)
+library(cartography)
+library(paletteer)
+library(rcartocolor)
+library(tidyverse)
+library(rhdf5)
+library(tools)
+library(dendextend)
+library(preprocessCore)
+library(vioplot)
+library(ggrepel)
+library(ggfortify)
+library(circlize)
+library(tibble)
+library(ComplexHeatmap)
+library(readr)
+library(readxl)
+library(collapse)
+library(VennDiagram)
+library(gplots)
+library(tidyverse)
+library(AnnotationDbi)
+library(textshape)
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+# Read files with genes from Iguaracy comparisons
+#emergent_genes <- as.data.frame(read_xlsx("tables/271_DEGs_Emergents.xlsx"))
+#genes_by_cond <- as.data.frame(read_xlsx("tables/DEGs_by_condition_iguara.xlsx"))
+tf <- as.data.frame(read.table(file = 'tables/TFs/trrust_rawdata.human.tsv',sep = '\t'))
+
+#Expression file
+exp <- read.csv("samples/array.norm.filtered.nomapping.csv")
+exp$Genes <- NULL
+rownames(exp) <- exp$GeneSymbol
+exp$GeneSymbol <- NULL
+colnames(exp) <- c("OSS_ALL_72h_1", "OSS_ALL_72h_2","OSS_ALL_72h_3","OSS_ALL_72h_4",
+                  "rm_OSS_1", "rm_OSS_2","rm_OSS_3","rm_OSS_4",
+                  "rm_IL1B_1","rm_IL1B_2","rm_IL1B_3","rm_IL1B_4",
+                  "rm_OxPAPC_1","rm_OxPAPC_2","rm_OxPAPC_3","rm_OxPAPC_4",
+                  "rm_CoCl2_1","rm_CoCl2_2","rm_CoCl2_3","rm_CoCl2_4",
+                  "LSS_48h_1","LSS_48h_2","LSS_48h_3","LSS_48h_4")
+exp <- as.matrix(exp)
+
+# Read DEGs from my comparisons
+rm_OSSvsOSS_ALL_72h_DEG <- read_csv("tables/rm_OSSvsOSS_ALL_72h_DEGs.csv")
+rm_IL1BvsOSS_ALL_72h_DEG <- read_csv("tables/rm_IL1BvsOSS_ALL_72h_DEGs.csv")
+rm_OxPAPCvsOSS_ALL_72h_DEG <- read_csv("tables/rm_OxPAPCvsOSS_ALL_72h_DEGs.csv")
+rm_CoCl2vsOSS_ALL_72h_DEG <- read_csv("tables/rm_CoCl2vsOSS_ALL_72h_DEGs.csv")
+LSS_48hvsOSS_ALL_72h_DEG <- read_csv("tables/LSS_48hvsOSS_ALL_72h_DEGs.csv")
+
+#Read all genes
+rm_OSSvsOSS_ALL_72h_allgenes <- read_csv("tables/rm_OSSvsOSS_ALL_72h_allgenes.csv")
+rm_IL1BvsOSS_ALL_72h_allgenes <- read_csv("tables/rm_IL1BvsOSS_ALL_72h_allgenes.csv")
+rm_OxPAPCvsOSS_ALL_72h_allgenes <- read_csv("tables/rm_OxPAPCvsOSS_ALL_72h_allgenes.csv")
+rm_CoCl2vsOSS_ALL_72h_allgenes <- read_csv("tables/rm_CoCl2vsOSS_ALL_72h_allgenes.csv")
+LSS_48hvsOSS_ALL_72h_allgenes <- read_csv("tables/LSS_48hvsOSS_ALL_72h_allgenes.csv")
+```
+
+<!-- ## Filter Emergent genes from conditions -->
+
+<!-- ```{r, warning=FALSE} -->
+<!-- genes_by_cond[,2:17] <- sapply(genes_by_cond[,2:17], as.numeric) -->
+
+<!-- #Invert signal from genes (converts OSS_ALL_vs_LSS_48h to LSS_48h_vs_OSS_ALL) -->
+<!-- f <- function(x) 1*x -->
+<!-- genes_by_cond_neg <- genes_by_cond -->
+<!-- genes_by_cond_neg[,2:17] <- sapply(genes_by_cond_neg[,2:17], f) -->
+
+<!-- #Get DEGs from LSS_48h_vs_OSS_ALL_48h -->
+<!-- genes_by_cond_LSS_48h_vs_OSS_ALL_48h <- genes_by_cond_neg[colnames(genes_by_cond_neg) %in% c('OSS_ALL_vs_LSS','SYMBOL')] -->
+<!-- genes_by_cond_LSS_48h_vs_OSS_ALL_48h <- drop_na(genes_by_cond_LSS_48h_vs_OSS_ALL_48h) -->
+<!-- rownames(genes_by_cond_LSS_48h_vs_OSS_ALL_48h) <- genes_by_cond_LSS_48h_vs_OSS_ALL_48h$SYMBOL -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- #Create Venn Diagrams with my conditions -->
+<!-- degs_oss_rm_il1b = list('rm_IL1B_vs_OSS_ALL' = rm_IL1BvsOSS_ALL_72h_DEG$SYMBOL, -->
+<!--                         'OSS_ALL_48h_vs_LSS_48h' = genes_by_cond_LSS_48h_vs_OSS_ALL_48h$SYMBOL) -->
+<!-- venn_genes_DEGS_oss_rm_il1b = venn(degs_oss_rm_il1b, show.plot = TRUE) -->
+
+<!-- degs_oss_rm_oxpapc = list('rm_OxPAPC_vs_OSS_ALL' = rm_OxPAPCvsOSS_ALL_72h_DEG$SYMBOL, -->
+<!--                           'OSS_ALL_48h_vs_LSS_48h' = genes_by_cond_LSS_48h_vs_OSS_ALL_48h$SYMBOL) -->
+
+<!-- venn_genes_DEGS_oss_rm_oxpapc = venn(degs_oss_rm_oxpapc, show.plot = TRUE) -->
+
+<!-- degs_oss_rm_cocl2 = list('rm_CoCl2_vs_OSS_ALL' = rm_CoCl2vsOSS_ALL_72h_DEG$SYMBOL, -->
+<!--                          'OSS_ALL_48h_vs_LSS_48h' = genes_by_cond_LSS_48h_vs_OSS_ALL_48h$SYMBOL) -->
+
+<!-- venn_genes_DEGS_oss_rm_cocl2 = venn(degs_oss_rm_cocl2, show.plot = TRUE) -->
+
+<!-- degs_rm_oss = list('rm_OSS_vs_OSS_ALL' = rm_OSSvsOSS_ALL_72h_DEG$SYMBOL, -->
+<!--                     'OSS_ALL_48h_vs_LSS_48h' = genes_by_cond_LSS_48h_vs_OSS_ALL_48h$SYMBOL) -->
+
+<!-- venn_genes_DEGS_rm_oss = venn(degs_rm_oss, show.plot = TRUE) -->
+
+<!-- degs_lss_pure = list('LSS_48h_vs_OSS_ALL_72h' = LSS_48hvsOSS_ALL_72h_DEG$SYMBOL, -->
+<!--                     'OSS_ALL_48h_vs_LSS_48h' = genes_by_cond_LSS_48h_vs_OSS_ALL_48h$SYMBOL) -->
+
+<!-- venn_genes_DEGS_lss_pure = venn(degs_lss_pure, show.plot = TRUE) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- # Extract emergent genes from the intersections -->
+<!-- intersec_oss_rm_il1b <- attributes(venn_genes_DEGS_oss_rm_il1b) -->
+<!-- intersec_oss_rm_il1b <- intersec_oss_rm_il1b$intersections$`rm_IL1B_vs_OSS_ALL:LSS_48h_vs_OSS_ALL_48h` -->
+<!-- emergent_intersec_oss_rm_il1b <- emergent_genes[emergent_genes$SYMBOL %in% intersec_oss_rm_il1b,c('SYMBOL','GENENAME')] -->
+<!-- emergent_intersec_oss_rm_il1b <- rm_IL1BvsOSS_ALL_72h_DEG[rm_IL1BvsOSS_ALL_72h_DEG$SYMBOL %in% emergent_intersec_oss_rm_il1b$SYMBOL,] -->
+<!-- write.csv(emergent_intersec_oss_rm_il1b, "tables/emergent_intersec_oss_rm_il1b.csv") -->
+<!-- not_emergent_intersec_oss_rm_il1b <- rm_IL1BvsOSS_ALL_72h_DEG[!(rm_IL1BvsOSS_ALL_72h_DEG$SYMBOL %in% emergent_intersec_oss_rm_il1b$SYMBOL),] -->
+<!-- write.csv(not_emergent_intersec_oss_rm_il1b, "tables/not_emergent_intersec_oss_rm_il1b.csv") -->
+
+<!-- intersec_oss_rm_oxpapc <- attributes(venn_genes_DEGS_oss_rm_oxpapc) -->
+<!-- intersec_oss_rm_oxpapc <- intersec_oss_rm_oxpapc$intersections$`rm_OxPAPC_vs_OSS_ALL:LSS_48h_vs_OSS_ALL_48h` -->
+<!-- emergent_intersec_oss_rm_oxpapc <- emergent_genes[emergent_genes$SYMBOL %in% intersec_oss_rm_oxpapc,c('SYMBOL','GENENAME')] -->
+<!-- emergent_intersec_oss_rm_oxpapc <- rm_OxPAPCvsOSS_ALL_72h_DEG[rm_OxPAPCvsOSS_ALL_72h_DEG$SYMBOL %in% emergent_intersec_oss_rm_oxpapc$SYMBOL,] -->
+<!-- write.csv(emergent_intersec_oss_rm_oxpapc, "tables/emergent_intersec_oss_rm_oxpapc.csv") -->
+<!-- not_emergent_intersec_oss_rm_oxpapc <- rm_OxPAPCvsOSS_ALL_72h_DEG[!(rm_OxPAPCvsOSS_ALL_72h_DEG$SYMBOL %in% emergent_intersec_oss_rm_oxpapc$SYMBOL),] -->
+<!-- write.csv(not_emergent_intersec_oss_rm_oxpapc, "tables/not_emergent_intersec_oss_rm_oxpapc.csv") -->
+
+<!-- intersec_oss_rm_cocl2 <- attributes(venn_genes_DEGS_oss_rm_cocl2) -->
+<!-- intersec_oss_rm_cocl2 <- intersec_oss_rm_cocl2$intersections$`rm_CoCl2_vs_OSS_ALL:LSS_48h_vs_OSS_ALL_48h` -->
+<!-- emergent_intersec_oss_rm_cocl2 <- emergent_genes[emergent_genes$SYMBOL %in% intersec_oss_rm_cocl2,c('SYMBOL','GENENAME')] -->
+<!-- emergent_intersec_oss_rm_cocl2 <- rm_CoCl2vsOSS_ALL_72h_DEG[rm_CoCl2vsOSS_ALL_72h_DEG$SYMBOL %in% emergent_intersec_oss_rm_cocl2$SYMBOL,] -->
+<!-- write.csv(emergent_intersec_oss_rm_cocl2, "tables/emergent_intersec_oss_rm_cocl2.csv") -->
+<!-- not_emergent_intersec_oss_rm_cocl2 <- rm_CoCl2vsOSS_ALL_72h_DEG[!(rm_CoCl2vsOSS_ALL_72h_DEG$SYMBOL %in% emergent_intersec_oss_rm_cocl2$SYMBOL),] -->
+<!-- write.csv(not_emergent_intersec_oss_rm_cocl2, "tables/not_emergent_intersec_oss_rm_cocl2.csv") -->
+
+<!-- intersec_rm_oss <- attributes(venn_genes_DEGS_rm_oss) -->
+<!-- intersec_rm_oss <- intersec_rm_oss$intersections$`rm_OSS_vs_OSS_ALL:LSS_48h_vs_OSS_ALL_48h` -->
+<!-- emergent_intersec_rm_oss <- emergent_genes[emergent_genes$SYMBOL %in% intersec_rm_oss,c('SYMBOL','GENENAME')] -->
+<!-- emergent_intersec_rm_oss <- rm_OSSvsOSS_ALL_72h_DEG[rm_OSSvsOSS_ALL_72h_DEG$SYMBOL %in% emergent_intersec_rm_oss$SYMBOL,] -->
+<!-- write.csv(emergent_intersec_rm_oss, "tables/emergent_intersec_rm_oss.csv") -->
+<!-- not_emergent_intersec_rm_oss <- rm_OSSvsOSS_ALL_72h_DEG[!(rm_OSSvsOSS_ALL_72h_DEG$SYMBOL %in% emergent_intersec_rm_oss$SYMBOL),] -->
+<!-- write.csv(not_emergent_intersec_rm_oss, "tables/not_emergent_intersec_rm_oss") -->
+
+<!-- intersec_lss_pure <- attributes(venn_genes_DEGS_lss_pure) -->
+<!-- intersec_lss_pure <- intersec_lss_pure$intersections$`LSS_48h_vs_OSS_ALL_72h:LSS_48h_vs_OSS_ALL_48h` -->
+<!-- emergent_intersec_lss_pure <- emergent_genes[emergent_genes$SYMBOL %in% intersec_lss_pure,c('SYMBOL','GENENAME')] -->
+<!-- emergent_intersec_lss_pure <- LSS_48hvsOSS_ALL_72h_DEG[LSS_48hvsOSS_ALL_72h_DEG$SYMBOL %in% emergent_intersec_lss_pure$SYMBOL,] -->
+<!-- write.csv(emergent_intersec_lss_pure, "tables/emergent_intersec_lss_pure.csv") -->
+<!-- not_emergent_intersec_lss_pure <- LSS_48hvsOSS_ALL_72h_DEG[!(LSS_48hvsOSS_ALL_72h_DEG$SYMBOL %in% emergent_intersec_lss_pure$SYMBOL),] -->
+<!-- write.csv(not_emergent_intersec_lss_pure, "tables/not_emergent_intersec_lss_pure.csv") -->
+<!-- ``` -->
+
+<!-- ## Plot expression of Emergent genes in intersection -->
+
+<!-- ```{r, fig.height=9, fig.width=6} -->
+<!-- emergent_intersec_oss_rm_oxpapc <- as.data.frame(emergent_intersec_oss_rm_oxpapc[,c("SYMBOL","logFC")]) -->
+<!-- rownames(emergent_intersec_oss_rm_oxpapc) <- emergent_intersec_oss_rm_oxpapc$SYMBOL -->
+<!-- emergent_intersec_oss_rm_oxpapc <- emergent_intersec_oss_rm_oxpapc[order(row.names(emergent_intersec_oss_rm_oxpapc)),] -->
+<!-- emergent_intersec_oss_rm_oxpapc$SYMBOL <- NULL -->
+<!-- colnames(emergent_intersec_oss_rm_oxpapc) <- "rm_OxPAPC_vs_OSS_ALL_72h" -->
+<!-- genes_by_cond_LSS_48h_vs_OSS_ALL_48h_rm_oxpapc <- genes_by_cond_LSS_48h_vs_OSS_ALL_48h[rownames(genes_by_cond_LSS_48h_vs_OSS_ALL_48h) %in% rownames(emergent_intersec_oss_rm_oxpapc),] -->
+<!-- genes_by_cond_LSS_48h_vs_OSS_ALL_48h_rm_oxpapc <- genes_by_cond_LSS_48h_vs_OSS_ALL_48h_rm_oxpapc[order(row.names(genes_by_cond_LSS_48h_vs_OSS_ALL_48h_rm_oxpapc)),] -->
+<!-- genes_by_cond_LSS_48h_vs_OSS_ALL_48h_rm_oxpapc$SYMBOL <- NULL -->
+<!-- colnames(genes_by_cond_LSS_48h_vs_OSS_ALL_48h_rm_oxpapc) <- "OSS_ALL_48h_vs_LSS_48h" -->
+<!-- merge_rm_oxpapc <- cbind(emergent_intersec_oss_rm_oxpapc,genes_by_cond_LSS_48h_vs_OSS_ALL_48h_rm_oxpapc) -->
+
+<!-- merge_rm_oxpapc <- as.matrix(merge_rm_oxpapc) -->
+
+<!-- col_fun  <- colorRamp2(c(-4, 0, 4), c("purple", "white", "firebrick")) -->
+
+<!-- df_colnames <- as.data.frame((colnames(merge_rm_oxpapc))) -->
+<!-- colnames(df_colnames)[1]<- "Comparissons" -->
+
+<!-- ##prepare heatmap plot -->
+<!-- ##add colnames -->
+<!-- haTerms_colnames <- HeatmapAnnotation( -->
+<!--   df = df_colnames, -->
+<!--   #col = col_fun, -->
+<!--   Term = anno_text( -->
+<!--     colnames(merge_rm_oxpapc), -->
+<!--     rot = 45, -->
+<!--     just = 'right', -->
+<!--     gp = gpar(fontsize = 13, fontface = 'bold')), -->
+<!--   annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')), -->
+<!--   annotation_name_side = 'left') -->
+<!-- ##change legend sizes -->
+<!-- Term = anno_text( -->
+<!--   colnames(merge_rm_oxpapc), -->
+<!--   rot = 45, -->
+<!--   just = 'right', -->
+<!--   gp = gpar(fontsize = 13, fontface = 'bold')) -->
+
+<!-- merge_rm_oxpapc_plot <- Heatmap(merge_rm_oxpapc, -->
+<!--                          name = 'logFC', -->
+<!--                          col = col_fun, -->
+<!--                          cluster_rows = TRUE, -->
+<!--                          cluster_row_slices = TRUE, -->
+<!--                          show_row_dend = TRUE, -->
+<!--                          row_title = 'Genes', -->
+<!--                          row_title_side = 'left', -->
+<!--                          row_title_gp = gpar(fontsize = 11, fontface = 'bold'), -->
+<!--                          row_title_rot = 90, -->
+<!--                          show_row_names = TRUE, -->
+<!--                          row_names_gp = gpar(fontsize = 11, fontface = 'bold'), -->
+<!--                          row_names_side = 'left', -->
+<!--                          row_dend_width = unit(20, 'mm'), -->
+
+<!--                          cluster_columns = FALSE, -->
+<!--                          show_column_dend = FALSE, -->
+<!--                          column_title = '46 emergent genes in intersection', -->
+<!--                          column_title_side = 'top', -->
+<!--                          column_title_gp = gpar(fontsize = 13, fontface = 'bold'), -->
+<!--                          column_title_rot = 0, -->
+<!--                          show_column_names = TRUE, -->
+<!--                          show_heatmap_legend = TRUE, -->
+<!--                          column_names_gp = gpar(fontsize = 8, fontface = 'bold'), -->
+<!--                          column_names_rot = 45,##change the angle of column name -->
+
+<!--                          clustering_distance_rows = 'euclidean', -->
+<!--                          clustering_method_rows = 'ward.D2')#, -->
+
+<!-- merge_rm_oxpapc_plot -->
+<!-- ``` -->
+
+<!-- ```{r, fig.height=9, fig.width=6} -->
+<!-- emergent_intersec_oss_rm_cocl2 <- as.data.frame(emergent_intersec_oss_rm_cocl2[,c("SYMBOL","logFC")]) -->
+<!-- rownames(emergent_intersec_oss_rm_cocl2) <- emergent_intersec_oss_rm_cocl2$SYMBOL -->
+<!-- emergent_intersec_oss_rm_cocl2 <- emergent_intersec_oss_rm_cocl2[order(row.names(emergent_intersec_oss_rm_cocl2)),] -->
+<!-- emergent_intersec_oss_rm_cocl2$SYMBOL <- NULL -->
+<!-- colnames(emergent_intersec_oss_rm_cocl2) <- "rm_CoCl2_vs_OSS_ALL_72h" -->
+<!-- genes_by_cond_LSS_48h_vs_OSS_ALL_48h_rm_cocl2 <- genes_by_cond_LSS_48h_vs_OSS_ALL_48h[rownames(genes_by_cond_LSS_48h_vs_OSS_ALL_48h) %in% rownames(emergent_intersec_oss_rm_cocl2),] -->
+<!-- genes_by_cond_LSS_48h_vs_OSS_ALL_48h_rm_cocl2 <- genes_by_cond_LSS_48h_vs_OSS_ALL_48h_rm_cocl2[order(row.names(genes_by_cond_LSS_48h_vs_OSS_ALL_48h_rm_cocl2)),] -->
+<!-- genes_by_cond_LSS_48h_vs_OSS_ALL_48h_rm_cocl2$SYMBOL <- NULL -->
+<!-- colnames(genes_by_cond_LSS_48h_vs_OSS_ALL_48h_rm_cocl2) <- "OSS_ALL_48h_vs_LSS_48h" -->
+<!-- merge_rm_cocl2 <- cbind(emergent_intersec_oss_rm_cocl2,genes_by_cond_LSS_48h_vs_OSS_ALL_48h_rm_cocl2) -->
+
+<!-- merge_rm_cocl2 <- as.matrix(merge_rm_cocl2) -->
+
+<!-- col_fun  <- colorRamp2(c(-4, 0, 4), c("purple", "white", "firebrick")) -->
+
+<!-- df_colnames <- as.data.frame((colnames(merge_rm_cocl2))) -->
+<!-- colnames(df_colnames)[1]<- "Comparissons" -->
+
+<!-- ##prepare heatmap plot -->
+<!-- ##add colnames -->
+<!-- haTerms_colnames <- HeatmapAnnotation( -->
+<!--   df = df_colnames, -->
+<!--   #col = col_fun, -->
+<!--   Term = anno_text( -->
+<!--     colnames(merge_rm_cocl2), -->
+<!--     rot = 45, -->
+<!--     just = 'right', -->
+<!--     gp = gpar(fontsize = 13, fontface = 'bold')), -->
+<!--   annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')), -->
+<!--   annotation_name_side = 'left') -->
+<!-- ##change legend sizes -->
+<!-- Term = anno_text( -->
+<!--   colnames(merge_rm_cocl2), -->
+<!--   rot = 45, -->
+<!--   just = 'right', -->
+<!--   gp = gpar(fontsize = 13, fontface = 'bold')) -->
+
+<!-- merge_rm_cocl2_plot <- Heatmap(merge_rm_cocl2, -->
+<!--                          name = 'logFC', -->
+<!--                          col = col_fun, -->
+<!--                          cluster_rows = TRUE, -->
+<!--                          cluster_row_slices = TRUE, -->
+<!--                          show_row_dend = TRUE, -->
+<!--                          row_title = 'Genes', -->
+<!--                          row_title_side = 'left', -->
+<!--                          row_title_gp = gpar(fontsize = 11, fontface = 'bold'), -->
+<!--                          row_title_rot = 90, -->
+<!--                          show_row_names = TRUE, -->
+<!--                          row_names_gp = gpar(fontsize = 11, fontface = 'bold'), -->
+<!--                          row_names_side = 'left', -->
+<!--                          row_dend_width = unit(20, 'mm'), -->
+
+<!--                          cluster_columns = FALSE, -->
+<!--                          show_column_dend = FALSE, -->
+<!--                          column_title = '35 emergent genes in intersection', -->
+<!--                          column_title_side = 'top', -->
+<!--                          column_title_gp = gpar(fontsize = 13, fontface = 'bold'), -->
+<!--                          column_title_rot = 0, -->
+<!--                          show_column_names = TRUE, -->
+<!--                          show_heatmap_legend = TRUE, -->
+<!--                          column_names_gp = gpar(fontsize = 8, fontface = 'bold'), -->
+<!--                          column_names_rot = 45,##change the angle of column name -->
+
+<!--                          clustering_distance_rows = 'euclidean', -->
+<!--                          clustering_method_rows = 'ward.D2')#, -->
+
+<!-- merge_rm_cocl2_plot -->
+<!-- ``` -->
+
+<!-- ```{r, fig.height=6, fig.width=6} -->
+<!-- emergent_intersec_rm_oss <- as.data.frame(emergent_intersec_rm_oss[,c("SYMBOL","logFC")]) -->
+<!-- rownames(emergent_intersec_rm_oss) <- emergent_intersec_rm_oss$SYMBOL -->
+<!-- emergent_intersec_rm_oss <- emergent_intersec_rm_oss[order(row.names(emergent_intersec_rm_oss)),] -->
+<!-- emergent_intersec_rm_oss$SYMBOL <- NULL -->
+<!-- colnames(emergent_intersec_rm_oss) <- "rm_OSS_vs_OSS_ALL_72h" -->
+<!-- genes_by_cond_LSS_48h_vs_OSS_ALL_48h_rm_oss <- genes_by_cond_LSS_48h_vs_OSS_ALL_48h[rownames(genes_by_cond_LSS_48h_vs_OSS_ALL_48h) %in% rownames(emergent_intersec_rm_oss),] -->
+<!-- genes_by_cond_LSS_48h_vs_OSS_ALL_48h_rm_oss <- genes_by_cond_LSS_48h_vs_OSS_ALL_48h_rm_oss[order(row.names(genes_by_cond_LSS_48h_vs_OSS_ALL_48h_rm_oss)),] -->
+<!-- genes_by_cond_LSS_48h_vs_OSS_ALL_48h_rm_oss$SYMBOL <- NULL -->
+<!-- colnames(genes_by_cond_LSS_48h_vs_OSS_ALL_48h_rm_oss) <- "OSS_ALL_48h_vs_LSS_48h" -->
+<!-- merge_rm_oss <- cbind(emergent_intersec_rm_oss,genes_by_cond_LSS_48h_vs_OSS_ALL_48h_rm_oss) -->
+
+<!-- merge_rm_oss <- as.matrix(merge_rm_oss) -->
+
+<!-- col_fun  <- colorRamp2(c(-4, 0, 4), c("purple", "white", "firebrick")) -->
+
+<!-- df_colnames <- as.data.frame((colnames(merge_rm_oss))) -->
+<!-- colnames(df_colnames)[1]<- "Comparissons" -->
+
+<!-- ##prepare heatmap plot -->
+<!-- ##add colnames -->
+<!-- haTerms_colnames <- HeatmapAnnotation( -->
+<!--   df = df_colnames, -->
+<!--   #col = col_fun, -->
+<!--   Term = anno_text( -->
+<!--     colnames(merge_rm_oss), -->
+<!--     rot = 45, -->
+<!--     just = 'right', -->
+<!--     gp = gpar(fontsize = 13, fontface = 'bold')), -->
+<!--   annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')), -->
+<!--   annotation_name_side = 'left') -->
+<!-- ##change legend sizes -->
+<!-- Term = anno_text( -->
+<!--   colnames(merge_rm_oss), -->
+<!--   rot = 45, -->
+<!--   just = 'right', -->
+<!--   gp = gpar(fontsize = 13, fontface = 'bold')) -->
+
+<!-- merge_rm_oss_plot <- Heatmap(merge_rm_oss, -->
+<!--                          name = 'logFC', -->
+<!--                          col = col_fun, -->
+<!--                          cluster_rows = TRUE, -->
+<!--                          cluster_row_slices = TRUE, -->
+<!--                          show_row_dend = TRUE, -->
+<!--                          row_title = 'Genes', -->
+<!--                          row_title_side = 'left', -->
+<!--                          row_title_gp = gpar(fontsize = 11, fontface = 'bold'), -->
+<!--                          row_title_rot = 90, -->
+<!--                          show_row_names = TRUE, -->
+<!--                          row_names_gp = gpar(fontsize = 11, fontface = 'bold'), -->
+<!--                          row_names_side = 'left', -->
+<!--                          row_dend_width = unit(20, 'mm'), -->
+
+<!--                          cluster_columns = FALSE, -->
+<!--                          show_column_dend = FALSE, -->
+<!--                          column_title = '25 emergent genes in intersection', -->
+<!--                          column_title_side = 'top', -->
+<!--                          column_title_gp = gpar(fontsize = 13, fontface = 'bold'), -->
+<!--                          column_title_rot = 0, -->
+<!--                          show_column_names = TRUE, -->
+<!--                          show_heatmap_legend = TRUE, -->
+<!--                          column_names_gp = gpar(fontsize = 8, fontface = 'bold'), -->
+<!--                          column_names_rot = 45,##change the angle of column name -->
+
+<!--                          clustering_distance_rows = 'euclidean', -->
+<!--                          clustering_method_rows = 'ward.D2')#, -->
+
+<!-- merge_rm_oss_plot -->
+<!-- ``` -->
+
+<!-- ```{r, fig.height=4, fig.width=6} -->
+<!-- emergent_intersec_oss_rm_il1b <- as.data.frame(emergent_intersec_oss_rm_il1b[,c("SYMBOL","logFC")]) -->
+<!-- rownames(emergent_intersec_oss_rm_il1b) <- emergent_intersec_oss_rm_il1b$SYMBOL -->
+<!-- emergent_intersec_oss_rm_il1b <- emergent_intersec_oss_rm_il1b[order(row.names(emergent_intersec_oss_rm_il1b)),] -->
+<!-- emergent_intersec_oss_rm_il1b$SYMBOL <- NULL -->
+<!-- colnames(emergent_intersec_oss_rm_il1b) <- "rm_IL1B_vs_OSS_ALL_72h" -->
+<!-- genes_by_cond_LSS_48h_vs_OSS_ALL_48h_rm_il1b <- genes_by_cond_LSS_48h_vs_OSS_ALL_48h[rownames(genes_by_cond_LSS_48h_vs_OSS_ALL_48h) %in% rownames(emergent_intersec_oss_rm_il1b),] -->
+<!-- genes_by_cond_LSS_48h_vs_OSS_ALL_48h_rm_il1b <- genes_by_cond_LSS_48h_vs_OSS_ALL_48h_rm_il1b[order(row.names(genes_by_cond_LSS_48h_vs_OSS_ALL_48h_rm_il1b)),] -->
+<!-- genes_by_cond_LSS_48h_vs_OSS_ALL_48h_rm_il1b$SYMBOL <- NULL -->
+<!-- colnames(genes_by_cond_LSS_48h_vs_OSS_ALL_48h_rm_il1b) <- "OSS_ALL_48h_vs_LSS_48h" -->
+<!-- merge_rm_il1b <- cbind(emergent_intersec_oss_rm_il1b,genes_by_cond_LSS_48h_vs_OSS_ALL_48h_rm_il1b) -->
+
+<!-- merge_rm_il1b <- as.matrix(merge_rm_il1b) -->
+
+<!-- col_fun  <- colorRamp2(c(-4, 0, 4), c("purple", "white", "firebrick")) -->
+
+<!-- df_colnames <- as.data.frame((colnames(merge_rm_il1b))) -->
+<!-- colnames(df_colnames)[1]<- "Comparissons" -->
+
+<!-- ##prepare heatmap plot -->
+<!-- ##add colnames -->
+<!-- haTerms_colnames <- HeatmapAnnotation( -->
+<!--   df = df_colnames, -->
+<!--   #col = col_fun, -->
+<!--   Term = anno_text( -->
+<!--     colnames(merge_rm_il1b), -->
+<!--     rot = 45, -->
+<!--     just = 'right', -->
+<!--     gp = gpar(fontsize = 13, fontface = 'bold')), -->
+<!--   annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')), -->
+<!--   annotation_name_side = 'left') -->
+<!-- ##change legend sizes -->
+<!-- Term = anno_text( -->
+<!--   colnames(merge_rm_il1b), -->
+<!--   rot = 45, -->
+<!--   just = 'right', -->
+<!--   gp = gpar(fontsize = 13, fontface = 'bold')) -->
+
+<!-- merge_rm_il1b_plot <- Heatmap(merge_rm_il1b, -->
+<!--                          name = 'logFC', -->
+<!--                          col = col_fun, -->
+<!--                          cluster_rows = TRUE, -->
+<!--                          cluster_row_slices = TRUE, -->
+<!--                          show_row_dend = TRUE, -->
+<!--                          row_title = 'Genes', -->
+<!--                          row_title_side = 'left', -->
+<!--                          row_title_gp = gpar(fontsize = 11, fontface = 'bold'), -->
+<!--                          row_title_rot = 90, -->
+<!--                          show_row_names = TRUE, -->
+<!--                          row_names_gp = gpar(fontsize = 11, fontface = 'bold'), -->
+<!--                          row_names_side = 'left', -->
+<!--                          row_dend_width = unit(20, 'mm'), -->
+
+<!--                          cluster_columns = FALSE, -->
+<!--                          show_column_dend = FALSE, -->
+<!--                          column_title = '1 emergent gene in intersection', -->
+<!--                          column_title_side = 'top', -->
+<!--                          column_title_gp = gpar(fontsize = 13, fontface = 'bold'), -->
+<!--                          column_title_rot = 0, -->
+<!--                          show_column_names = TRUE, -->
+<!--                          show_heatmap_legend = TRUE, -->
+<!--                          column_names_gp = gpar(fontsize = 8, fontface = 'bold'), -->
+<!--                          column_names_rot = 45,##change the angle of column name -->
+
+<!--                          clustering_distance_rows = 'euclidean', -->
+<!--                          clustering_method_rows = 'ward.D2')#, -->
+
+<!-- merge_rm_il1b_plot -->
+<!-- ``` -->
+
+<!-- # Enrich emergent genes that change direction in expression -->
+
+<!-- ## rm OxPAPC -->
+
+<!-- ```{r} -->
+<!-- # rm_OxPAPC -->
+<!-- emergents_rm_oxpapc <- c("FGF2","CDC20","BUB1","CCNB2","NEXN","TSPAN2","FOXM1","ANLN","ASPM","NCAPG","UBE2T","CCNA2","FAM83D","KIFC1","TACC3","KNL1","C1orf74", -->
+<!--                          "ZNF385D","MYPN","ARL4C","PDE7B","ARRDC3","ZDHHC14","PELI2","RRAGD","IGF2BP1","DTNA","OR1L8","STK32B") -->
+
+<!-- GO.emergent_rm_oxpapc<- enrichGO(emergents_rm_oxpapc, -->
+<!--                    ont= "BP", -->
+<!--                    universe = rm_OxPAPCvsOSS_ALL_72h_allgenes$SYMBOL, -->
+<!--                    OrgDb = "org.Hs.eg.db", -->
+<!--                    keyType= "SYMBOL", -->
+<!--                    minGSSize    = 5, -->
+<!--                    pvalueCutoff = 0.01, -->
+<!--                    pAdjustMethod = "BH") -->
+
+<!-- enrichment_GO.emergent_rm_oxpapc <- GO.emergent_rm_oxpapc -->
+
+<!-- emergent_rm_oxpapc_GO_tab <- as.data.frame(GO.emergent_rm_oxpapc) -->
+<!-- write.csv(emergent_rm_oxpapc_GO_tab, "Enrichment/emergent/emergent_rm_oxpapc_GO.csv") -->
+
+<!-- simMatrix_emergent_rm_oxpapc <- calculateSimMatrix(emergent_rm_oxpapc_GO_tab$ID, -->
+<!--                                 orgdb="org.Hs.eg.db", -->
+<!--                                 ont="BP", -->
+<!--                                 method="Jiang") -->
+
+<!-- scores <- setNames(-log10(emergent_rm_oxpapc_GO_tab$qvalue), emergent_rm_oxpapc_GO_tab$ID) -->
+<!-- reducedTerms_emergent_rm_oxpapc <- reduceSimMatrix(simMatrix_emergent_rm_oxpapc, -->
+<!--                                 scores, -->
+<!--                                 threshold=0.8, -->
+<!--                                 orgdb="org.Hs.eg.db") -->
+
+<!-- write.csv(reducedTerms_emergent_rm_oxpapc, "Enrichment/emergent/emergent_rm_oxpapc_GO_SIMP.csv") -->
+
+<!-- reducedTerms_emergent_rm_oxpapc <-subset(reducedTerms_emergent_rm_oxpapc, reducedTerms_emergent_rm_oxpapc$cluster<=10) -->
+
+<!-- dotplot(enrichment_GO.emergent_rm_oxpapc, title='29 Emergent genes that change direction - rm OxPAPC',showCategory = 10) -->
+<!-- treemapPlot(reducedTerms_emergent_rm_oxpapc) -->
+<!-- GO.emergent_rm_oxpapc_ts <- pairwise_termsim(enrichment_GO.emergent_rm_oxpapc) -->
+<!-- treeplot(GO.emergent_rm_oxpapc_ts, hclust_method = "average", -->
+<!--          showCategory = 30, split = FALSE, hexpand = 0.15, -->
+<!--          nCluster = 6, guide = "none") -->
+<!-- ``` -->
+
+<!-- ## rm CoCl2 -->
+
+<!-- ```{r} -->
+<!-- # rm_cocl2 -->
+<!-- emergents_rm_cocl2 <- c("FGF2","NEXN","TSPAN2","UBE2T","C1orf74","ADAMTS6","FOXM1", -->
+<!--                         "ZNF385D","MYPN","ARL4C","N4BP3","TXNIP","CLMN","RRAGD","TCF7L1","STK32B","IGF2BP1","DTNA","OR1L8") -->
+
+<!-- GO.emergent_rm_cocl2<- enrichGO(emergents_rm_cocl2, -->
+<!--                    ont= "BP", -->
+<!--                    universe = rm_CoCl2vsOSS_ALL_72h_allgenes$SYMBOL, -->
+<!--                    OrgDb = "org.Hs.eg.db", -->
+<!--                    keyType= "SYMBOL", -->
+<!--                    minGSSize    = 5, -->
+<!--                    pvalueCutoff = 0.05, -->
+<!--                    pAdjustMethod = "BH") -->
+
+<!-- enrichment_GO.emergent_rm_cocl2 <- GO.emergent_rm_cocl2 -->
+
+<!-- emergent_rm_cocl2_GO_tab <- as.data.frame(GO.emergent_rm_cocl2) -->
+<!-- write.csv(emergent_rm_cocl2_GO_tab, "Enrichment/emergent/emergent_rm_cocl2_GO.csv") -->
+
+<!-- simMatrix_emergent_rm_cocl2 <- calculateSimMatrix(emergent_rm_cocl2_GO_tab$ID, -->
+<!--                                 orgdb="org.Hs.eg.db", -->
+<!--                                 ont="BP", -->
+<!--                                 method="Jiang") -->
+
+<!-- scores <- setNames(-log10(emergent_rm_cocl2_GO_tab$qvalue), emergent_rm_cocl2_GO_tab$ID) -->
+<!-- reducedTerms_emergent_rm_cocl2 <- reduceSimMatrix(simMatrix_emergent_rm_cocl2, -->
+<!--                                 scores, -->
+<!--                                 threshold=0.8, -->
+<!--                                 orgdb="org.Hs.eg.db") -->
+
+<!-- write.csv(reducedTerms_emergent_rm_cocl2, "Enrichment/emergent/emergent_rm_cocl2_GO_SIMP.csv") -->
+
+<!-- reducedTerms_emergent_rm_cocl2 <-subset(reducedTerms_emergent_rm_cocl2, reducedTerms_emergent_rm_cocl2$cluster<=10) -->
+
+<!-- dotplot(enrichment_GO.emergent_rm_cocl2, title='19 Emergent genes that change direction - rm CoCl2',showCategory = 10) -->
+<!-- treemapPlot(reducedTerms_emergent_rm_cocl2) -->
+<!-- GO.emergent_rm_cocl2_ts <- pairwise_termsim(enrichment_GO.emergent_rm_cocl2) -->
+<!-- treeplot(GO.emergent_rm_cocl2_ts, hclust_method = "average", -->
+<!--          showCategory = 30, split = FALSE, hexpand = 0.15, -->
+<!--          nCluster = 6, guide = "none") -->
+<!-- ``` -->
+
+<!-- ## LSS ALL -->
+
+<!-- ```{r} -->
+<!-- # rm_oss -->
+<!-- emergents_rm_oss <- c("MYOZ2","NEXN","UBE2T","TINAGL1","CD34", -->
+<!--                        "TNFSF15","F2RL1","MYPN","CTSK","ARL4C","IGF2BP1","ARRDC3","PFKFB3","DTNA","TRAF5","DNMBP","MPP4","CDC42EP5","STK32B","EFNA4","TFAP2A") -->
+
+<!-- GO.emergent_rm_oss<- enrichGO(emergents_rm_oss, -->
+<!--                    ont= "BP", -->
+<!--                    universe = rm_OSSvsOSS_ALL_72h_allgenes$SYMBOL, -->
+<!--                    OrgDb = "org.Hs.eg.db", -->
+<!--                    keyType= "SYMBOL", -->
+<!--                    minGSSize    = 3, -->
+<!--                    pvalueCutoff = 0.05, -->
+<!--                    pAdjustMethod = "BH") -->
+
+<!-- enrichment_GO.emergent_rm_oss <- GO.emergent_rm_oss -->
+
+<!-- emergent_rm_oss_GO_tab <- as.data.frame(GO.emergent_rm_oss) -->
+<!-- write.csv(emergent_rm_oss_GO_tab, "Enrichment/emergent/emergent_rm_oss_GO.csv") -->
+
+<!-- simMatrix_emergent_rm_oss <- calculateSimMatrix(emergent_rm_oss_GO_tab$ID, -->
+<!--                                 orgdb="org.Hs.eg.db", -->
+<!--                                 ont="BP", -->
+<!--                                 method="Jiang") -->
+
+<!-- scores <- setNames(-log10(emergent_rm_oss_GO_tab$qvalue), emergent_rm_oss_GO_tab$ID) -->
+<!-- reducedTerms_emergent_rm_oss <- reduceSimMatrix(simMatrix_emergent_rm_oss, -->
+<!--                                 scores, -->
+<!--                                 threshold=0.8, -->
+<!--                                 orgdb="org.Hs.eg.db") -->
+
+<!-- write.csv(reducedTerms_emergent_rm_oss, "Enrichment/emergent/emergent_rm_oss_GO_SIMP.csv") -->
+
+<!-- reducedTerms_emergent_rm_oss <-subset(reducedTerms_emergent_rm_oss, reducedTerms_emergent_rm_oss$cluster<=10) -->
+
+<!-- dotplot(enrichment_GO.emergent_rm_oss, title='21 Emergent genes that change direction - LSS ALL',showCategory = 10) -->
+<!-- treemapPlot(reducedTerms_emergent_rm_oss) -->
+<!-- GO.emergent_rm_oss_ts <- pairwise_termsim(enrichment_GO.emergent_rm_oss) -->
+<!-- treeplot(GO.emergent_rm_oss_ts, hclust_method = "average", -->
+<!--          showCategory = 30, split = FALSE, hexpand = 0.15, -->
+<!--          nCluster = 5, guide = "none") -->
+<!-- ``` -->
+
+
+## Create files with TFs
+
+```{r}
+# Filter TFs that are DEGs for each condition
+colnames(tf) <- c("TF","Target","Regulation","value")
+tf_rm_il1b <- tf[tf$TF %in% rm_IL1BvsOSS_ALL_72h_DEG$SYMBOL & tf$Target %in% rm_IL1BvsOSS_ALL_72h_DEG$SYMBOL,] #no tf is a deg
+tf_rm_il1b$logFC_TF <- rm_IL1BvsOSS_ALL_72h_DEG[match(tf_rm_il1b$TF, rm_IL1BvsOSS_ALL_72h_DEG$SYMBOL),]$logFC
+tf_rm_il1b$logFC_Target <- rm_IL1BvsOSS_ALL_72h_DEG[match(tf_rm_il1b$Target, rm_IL1BvsOSS_ALL_72h_DEG$SYMBOL),]$logFC
+tf_rm_il1b$value <- NULL
+write_csv(tf_rm_il1b,"tables/TFs/with_LSS_48h/TFs_DEGs_rm_IL1B.csv")
+
+tf_rm_oxpapc <- tf[tf$TF %in% rm_OxPAPCvsOSS_ALL_72h_DEG$SYMBOL & tf$Target %in% rm_OxPAPCvsOSS_ALL_72h_DEG$SYMBOL,]
+tf_rm_oxpapc$logFC_TF <- rm_OxPAPCvsOSS_ALL_72h_DEG[match(tf_rm_oxpapc$TF, rm_OxPAPCvsOSS_ALL_72h_DEG$SYMBOL),]$logFC
+tf_rm_oxpapc$logFC_Target <- rm_OxPAPCvsOSS_ALL_72h_DEG[match(tf_rm_oxpapc$Target, rm_OxPAPCvsOSS_ALL_72h_DEG$SYMBOL),]$logFC
+tf_rm_oxpapc$value <- NULL
+write_csv(tf_rm_oxpapc,"tables/TFs/with_LSS_48h/TFs_DEGs_rm_OxPAPC.csv")
+
+tf_rm_cocl2 <- tf[tf$TF %in% rm_CoCl2vsOSS_ALL_72h_DEG$SYMBOL & tf$Target %in% rm_CoCl2vsOSS_ALL_72h_DEG$SYMBOL,]
+tf_rm_cocl2$logFC_TF <- rm_CoCl2vsOSS_ALL_72h_DEG[match(tf_rm_cocl2$TF, rm_CoCl2vsOSS_ALL_72h_DEG$SYMBOL),]$logFC
+tf_rm_cocl2$logFC_Target <- rm_CoCl2vsOSS_ALL_72h_DEG[match(tf_rm_cocl2$Target, rm_CoCl2vsOSS_ALL_72h_DEG$SYMBOL),]$logFC
+tf_rm_cocl2$value <- NULL
+write_csv(tf_rm_cocl2,"tables/TFs/with_LSS_48h/TFs_DEGs_rm_CoCl2.csv")
+
+tf_rm_oss <- tf[tf$TF %in% rm_OSSvsOSS_ALL_72h_DEG$SYMBOL & tf$Target %in% rm_OSSvsOSS_ALL_72h_DEG$SYMBOL,]
+tf_rm_oss$logFC_TF <- rm_OSSvsOSS_ALL_72h_DEG[match(tf_rm_oss$TF, rm_OSSvsOSS_ALL_72h_DEG$SYMBOL),]$logFC
+tf_rm_oss$logFC_Target <- rm_OSSvsOSS_ALL_72h_DEG[match(tf_rm_oss$Target, rm_OSSvsOSS_ALL_72h_DEG$SYMBOL),]$logFC
+tf_rm_oss$value <- NULL
+write_csv(tf_rm_oss,"tables/TFs/with_LSS_48h/TFs_DEGs_rm_OSS.csv")
+
+tf_lss_48h <- tf[tf$TF %in% LSS_48hvsOSS_ALL_72h_DEG$SYMBOL & tf$Target %in% LSS_48hvsOSS_ALL_72h_DEG$SYMBOL,]
+tf_lss_48h$logFC_TF <- LSS_48hvsOSS_ALL_72h_DEG[match(tf_lss_48h$TF, LSS_48hvsOSS_ALL_72h_DEG$SYMBOL),]$logFC
+tf_lss_48h$logFC_Target <- LSS_48hvsOSS_ALL_72h_DEG[match(tf_lss_48h$Target, LSS_48hvsOSS_ALL_72h_DEG$SYMBOL),]$logFC
+tf_lss_48h$value <- NULL
+write_csv(tf_lss_48h,"tables/TFs/with_LSS_48h/TFs_DEGs_LSS_48h.csv")
+
+# tf_lss_pure <- tf[tf$TF %in% LSS_48hvsOSS_ALL_72h_DEG$SYMBOL & tf$Target %in% LSS_48hvsOSS_ALL_72h_DEG$SYMBOL,]
+# tf_lss_pure$logFC_TF <- LSS_48hvsOSS_ALL_72h_DEG[match(tf_lss_pure$TF, LSS_48hvsOSS_ALL_72h_DEG$SYMBOL),]$logFC
+# tf_lss_pure$logFC_Target <- LSS_48hvsOSS_ALL_72h_DEG[match(tf_lss_pure$Target, LSS_48hvsOSS_ALL_72h_DEG$SYMBOL),]$logFC
+# tf_lss_pure$value <- NULL
+# write_csv(tf_lss_pure,"tables/TFs/TFs_DEGs_LSS_48h.csv")
+
+# #Create file with LSS_48h vs OSS+ALL 72h
+# tf_lss_pure_base_ossall <- tf_lss_pure
+# tf_lss_pure_base_ossall$logFC_TF <- -1* tf_lss_pure_base_ossall$logFC_TF
+# tf_lss_pure_base_ossall$logFC_Target <- -1* tf_lss_pure_base_ossall$logFC_Target
+# write_csv(tf_lss_pure_base_ossall,"tables/TFs/TFs_DEGs_LSS_48hvsOSSALL72h.csv")
+# 
+# #######################################
+# #READ FILES FOR CREATE TFs vs LSS 48h
+# OSS_ALL_72hvsLSS_48h_DEG <- read_csv("tables/OSS_ALL_72hvsLSS_48h_DEGs.csv")
+# rm_IL1BvsLSS_48h_DEG <- read_csv("tables/rm_IL1BvsLSS_48h_DEGs.csv")
+# rm_OxPAPCvsLSS_48h_DEG <- read_csv("tables/rm_OxPAPCvsLSS_48h_DEGs.csv")
+# rm_CoCl2vsLSS_48h_DEG <- read_csv("tables/rm_CoCl2vsLSS_48h_DEGs.csv")
+# rm_OSSvsLSS_48h_DEG <- read_csv("tables/rm_OSSvsLSS_48h_DEGs.csv")
+# 
+# #READ ALL GENES FILES FOR VS LSS48H
+# all_oss_all <- read_csv("tables/OSS_ALL_72hvsLSS_48h_allgenes.csv")
+# all_rm_il1b <- read_csv("tables/rm_IL1BvsLSS_48h_allgenes.csv")
+# all_rm_cocl2 <- read_csv("tables/rm_CoCl2vsLSS_48h_allgenes.csv")
+# all_rm_oss <- read_csv("tables/rm_OSSvsLSS_48h_allgenes.csv")
+# all_rm_oxpapc <- read_csv("tables/rm_OxPAPCvsLSS_48h_allgenes.csv")
+# 
+# iguara_all <- read_csv("tables/OSS_Hyp_IL1B_OxPAPC_LSS_all_genes.csv")
+# #######################################
+# 
+# # CREATE TF FILES FOR COMPARISONS WITH LSS_48H
+# colnames(tf) <- c("TF","Target","Regulation","value")
+# regulon_from_myc_runx1 <- c("ASS1","ATF3","AXIN2","CCND2","CCNA2","CSF2","CSF1","CD34","CXCR4","IGF2BP1","FOXM1","ID2","PMAIP1","KLF4","FHL2","PIK3CD")
+# tf_iguara_all <- tf[tf$TF %in% iguara_all$SYMBOL & tf$Target %in% iguara_all$SYMBOL,]
+# tf_iguara_all$logFC_TF <- iguara_all[match(tf_iguara_all$TF, iguara_all$SYMBOL),]$logFC
+# tf_iguara_all$logFC_Target <- iguara_all[match(tf_iguara_all$Target, iguara_all$SYMBOL),]$logFC
+# tf_iguara_all$value <- NULL
+# tf_iguara_all <- tf_iguara_all[tf_iguara_all$TF %in% c("MYC","RUNX1") & tf_iguara_all$Target %in% regulon_from_myc_runx1,] 
+# write_csv(tf_iguara_all,"tables/TFs_DEGs_all_iguara.csv")
+# 
+# tf_oss_all_to_lss_48h <- tf[tf$TF %in% OSS_ALL_72hvsLSS_48h_DEG$SYMBOL & tf$Target %in% OSS_ALL_72hvsLSS_48h_DEG$SYMBOL,]
+# tf_oss_all_to_lss_48h$logFC_TF <- OSS_ALL_72hvsLSS_48h_DEG[match(tf_oss_all_to_lss_48h$TF, OSS_ALL_72hvsLSS_48h_DEG$SYMBOL),]$logFC
+# tf_oss_all_to_lss_48h$logFC_Target <- OSS_ALL_72hvsLSS_48h_DEG[match(tf_oss_all_to_lss_48h$Target, OSS_ALL_72hvsLSS_48h_DEG$SYMBOL),]$logFC
+# tf_oss_all_to_lss_48h$value <- NULL
+# write_csv(tf_oss_all_to_lss_48h,"tables/TFs_DEGs_oss_all_LSS48H.csv")
+# 
+# tf_rm_il1b <- tf[tf$TF %in% rm_IL1BvsLSS_48h_DEG$SYMBOL & tf$Target %in% rm_IL1BvsLSS_48h_DEG$SYMBOL,] #no tf is a deg
+# tf_rm_il1b$logFC_TF <- rm_IL1BvsLSS_48h_DEG[match(tf_rm_il1b$TF, rm_IL1BvsLSS_48h_DEG$SYMBOL),]$logFC
+# tf_rm_il1b$logFC_Target <- rm_IL1BvsLSS_48h_DEG[match(tf_rm_il1b$Target, rm_IL1BvsLSS_48h_DEG$SYMBOL),]$logFC
+# tf_rm_il1b$value <- NULL
+# write_csv(tf_rm_il1b,"tables/TFs_DEGs_rm_IL1B_LSS48H.csv")
+# 
+# tf_rm_oxpapc <- tf[tf$TF %in% rm_OxPAPCvsLSS_48h_DEG$SYMBOL & tf$Target %in% rm_OxPAPCvsLSS_48h_DEG$SYMBOL,]
+# tf_rm_oxpapc$logFC_TF <- rm_OxPAPCvsLSS_48h_DEG[match(tf_rm_oxpapc$TF, rm_OxPAPCvsLSS_48h_DEG$SYMBOL),]$logFC
+# tf_rm_oxpapc$logFC_Target <- rm_OxPAPCvsLSS_48h_DEG[match(tf_rm_oxpapc$Target, rm_OxPAPCvsLSS_48h_DEG$SYMBOL),]$logFC
+# tf_rm_oxpapc$value <- NULL
+# write_csv(tf_rm_oxpapc,"tables/TFs_DEGs_rm_OxPAPC_LSS48H.csv")
+# 
+# tf_rm_cocl2 <- tf[tf$TF %in% rm_CoCl2vsLSS_48h_DEG$SYMBOL & tf$Target %in% rm_CoCl2vsLSS_48h_DEG$SYMBOL,]
+# tf_rm_cocl2$logFC_TF <- rm_CoCl2vsLSS_48h_DEG[match(tf_rm_cocl2$TF, rm_CoCl2vsLSS_48h_DEG$SYMBOL),]$logFC
+# tf_rm_cocl2$logFC_Target <- rm_CoCl2vsLSS_48h_DEG[match(tf_rm_cocl2$Target, rm_CoCl2vsLSS_48h_DEG$SYMBOL),]$logFC
+# tf_rm_cocl2$value <- NULL
+# write_csv(tf_rm_cocl2,"tables/TFs_DEGs_rm_CoCl2_LSS48H.csv")
+# 
+# tf_rm_oss <- tf[tf$TF %in% rm_OSSvsLSS_48h_DEG$SYMBOL & tf$Target %in% rm_OSSvsLSS_48h_DEG$SYMBOL,]
+# tf_rm_oss$logFC_TF <- rm_OSSvsLSS_48h_DEG[match(tf_rm_oss$TF, rm_OSSvsLSS_48h_DEG$SYMBOL),]$logFC
+# tf_rm_oss$logFC_Target <- rm_OSSvsLSS_48h_DEG[match(tf_rm_oss$Target, rm_OSSvsLSS_48h_DEG$SYMBOL),]$logFC
+# tf_rm_oss$value <- NULL
+# write_csv(tf_rm_oss,"tables/TFs_DEGs_rm_OSS_LSS48H.csv")
+```
+
+## Enrichment with genes from each comparison
+
+```{r}
+# # oss_all_to_lss_48h
+# 
+# genes_net_oss_all_to_lss_48h <- unique(c(tf_oss_all_to_lss_48h$TF, tf_oss_all_to_lss_48h$Target))
+# 
+# GO.oss_all_to_lss_48h<- enrichGO(genes_net_oss_all_to_lss_48h,
+#                    ont= "BP",
+#                    universe = all_oss_all$SYMBOL,
+#                    OrgDb = "org.Hs.eg.db",
+#                    keyType= "SYMBOL",
+#                    minGSSize    = 5,
+#                    pvalueCutoff = 0.01,
+#                    pAdjustMethod = "BH")
+# 
+# enrichment_GO.oss_all_to_lss_48h <- GO.oss_all_to_lss_48h
+# 
+# GO.oss_all_to_lss_48h <- as.data.frame(GO.oss_all_to_lss_48h)
+# write.csv(GO.oss_all_to_lss_48h, "Enrichment/TF/oss_all_to_lss_48h_GO.csv")
+# 
+# simMatrix_oss_all_to_lss_48h <- calculateSimMatrix(GO.oss_all_to_lss_48h$ID,
+#                                 orgdb="org.Hs.eg.db",
+#                                 ont="BP",
+#                                 method="Jiang")
+# 
+# scores <- setNames(-log10(GO.oss_all_to_lss_48h$qvalue), GO.oss_all_to_lss_48h$ID)
+# reducedTerms_oss_all_to_lss_48h <- reduceSimMatrix(simMatrix_oss_all_to_lss_48h,
+#                                 scores,
+#                                 threshold=0.8,
+#                                 orgdb="org.Hs.eg.db")
+# 
+# write.csv(reducedTerms_oss_all_to_lss_48h, "Enrichment/TF/oss_all_to_lss_48h_GO_SIMP.csv")
+# 
+# reducedTerms_oss_all_to_lss_48h <-subset(reducedTerms_oss_all_to_lss_48h, reducedTerms_oss_all_to_lss_48h$cluster<=10)
+
+# rm OxPAPC
+genes_net_rm_oxpapc <- unique(c(tf_rm_oxpapc$TF, tf_rm_oxpapc$Target))
+
+GO.rm_oxpapc<- enrichGO(genes_net_rm_oxpapc,
+                   ont= "BP",
+                   universe = all_rm_oxpapc$SYMBOL,
+                   OrgDb = "org.Hs.eg.db",
+                   keyType= "SYMBOL",
+                   minGSSize    = 5,
+                   pvalueCutoff = 0.01,
+                   pAdjustMethod = "BH")
+
+enrichment_GO.rm_oxpapc <- GO.rm_oxpapc
+
+GO.rm_oxpapc <- as.data.frame(GO.rm_oxpapc)
+write.csv(GO.rm_oxpapc, "Enrichment/TF/rm_oxpapc_GO.csv")
+
+simMatrix_rm_oxpapc <- calculateSimMatrix(GO.rm_oxpapc$ID,
+                                orgdb="org.Hs.eg.db",
+                                ont="BP",
+                                method="Jiang")
+
+scores <- setNames(-log10(GO.rm_oxpapc$qvalue), GO.rm_oxpapc$ID)
+reducedTerms_rm_oxpapc <- reduceSimMatrix(simMatrix_rm_oxpapc,
+                                scores,
+                                threshold=0.8,
+                                orgdb="org.Hs.eg.db")
+
+write.csv(reducedTerms_rm_oxpapc, "Enrichment/TF/rm_oxpapc_GO_SIMP.csv")
+
+reducedTerms_rm_oxpapc <-subset(reducedTerms_rm_oxpapc, reducedTerms_rm_oxpapc$cluster<=10)
+
+# rm IL1B
+genes_net_rm_il1b <- unique(c(tf_rm_il1b$TF, tf_rm_il1b$Target))
+
+GO.rm_il1b<- enrichGO(genes_net_rm_il1b,
+                   ont= "BP",
+                   universe = all_rm_il1b$SYMBOL,
+                   OrgDb = "org.Hs.eg.db",
+                   keyType= "SYMBOL",
+                   minGSSize    = 5,
+                   pvalueCutoff = 0.01,
+                   pAdjustMethod = "BH")
+
+enrichment_GO.rm_il1b <- GO.rm_il1b
+
+GO.rm_il1b <- as.data.frame(GO.rm_il1b)
+write.csv(GO.rm_il1b, "Enrichment/TF/rm_il1b_GO.csv")
+
+simMatrix_rm_il1b <- calculateSimMatrix(GO.rm_il1b$ID,
+                                orgdb="org.Hs.eg.db",
+                                ont="BP",
+                                method="Jiang")
+
+scores <- setNames(-log10(GO.rm_il1b$qvalue), GO.rm_il1b$ID)
+reducedTerms_rm_il1b <- reduceSimMatrix(simMatrix_rm_il1b,
+                                scores,
+                                threshold=0.8,
+                                orgdb="org.Hs.eg.db")
+
+write.csv(reducedTerms_rm_il1b, "Enrichment/TF/rm_il1b_GO_SIMP.csv")
+
+reducedTerms_rm_il1b <-subset(reducedTerms_rm_il1b, reducedTerms_rm_il1b$cluster<=10)
+
+# rm CoCl2
+genes_net_rm_cocl2 <- unique(c(tf_rm_cocl2$TF, tf_rm_cocl2$Target))
+
+GO.rm_cocl2<- enrichGO(genes_net_rm_cocl2,
+                   ont= "BP",
+                   universe = all_rm_cocl2$SYMBOL,
+                   OrgDb = "org.Hs.eg.db",
+                   keyType= "SYMBOL",
+                   minGSSize    = 5,
+                   pvalueCutoff = 0.01,
+                   pAdjustMethod = "BH")
+
+enrichment_GO.rm_cocl2 <- GO.rm_cocl2
+
+GO.rm_cocl2 <- as.data.frame(GO.rm_cocl2)
+write.csv(GO.rm_cocl2, "Enrichment/TF/rm_cocl2_GO.csv")
+
+simMatrix_rm_cocl2 <- calculateSimMatrix(GO.rm_cocl2$ID,
+                                orgdb="org.Hs.eg.db",
+                                ont="BP",
+                                method="Jiang")
+
+scores <- setNames(-log10(GO.rm_cocl2$qvalue), GO.rm_cocl2$ID)
+reducedTerms_rm_cocl2 <- reduceSimMatrix(simMatrix_rm_cocl2,
+                                scores,
+                                threshold=0.8,
+                                orgdb="org.Hs.eg.db")
+
+write.csv(reducedTerms_rm_cocl2, "Enrichment/TF/rm_cocl2_GO_SIMP.csv")
+
+reducedTerms_rm_cocl2 <-subset(reducedTerms_rm_cocl2, reducedTerms_rm_cocl2$cluster<=10)
+
+#  rm_oss
+genes_net_rm_oss <- unique(c(tf_rm_oss$TF, tf_rm_oss$Target))
+
+GO.rm_oss<- enrichGO(genes_net_rm_oss,
+                   ont= "BP",
+                   universe = all_rm_oss$SYMBOL,
+                   OrgDb = "org.Hs.eg.db",
+                   keyType= "SYMBOL",
+                   minGSSize    = 5,
+                   pvalueCutoff = 0.01,
+                   pAdjustMethod = "BH")
+
+enrichment_GO.rm_oss <- GO.rm_oss
+
+GO.rm_oss <- as.data.frame(GO.rm_oss)
+write.csv(GO.rm_oss, "Enrichment/TF/rm_oss_GO.csv")
+
+simMatrix_rm_oss <- calculateSimMatrix(GO.rm_oss$ID,
+                                orgdb="org.Hs.eg.db",
+                                ont="BP",
+                                method="Jiang")
+
+scores <- setNames(-log10(GO.rm_oss$qvalue), GO.rm_oss$ID)
+reducedTerms_rm_oss <- reduceSimMatrix(simMatrix_rm_oss,
+                                scores,
+                                threshold=0.8,
+                                orgdb="org.Hs.eg.db")
+
+write.csv(reducedTerms_rm_oss, "Enrichment/TF/rm_oss_GO_SIMP.csv")
+
+reducedTerms_rm_oss <-subset(reducedTerms_rm_oss, reducedTerms_rm_oss$cluster<=10)
+```
+
+Plot data from enrichments
+
+```{r}
+#treemapPlot
+#treemapPlot(reducedTerms_oss_all_to_lss_48h)
+treemapPlot(reducedTerms_rm_il1b)
+treemapPlot(reducedTerms_rm_oxpapc)
+treemapPlot(reducedTerms_rm_cocl2)
+treemapPlot(reducedTerms_rm_oss)
+
+#dotplot
+#dotplot(enrichment_GO.oss_all_to_lss_48h, title='OSS+ALL vs LSS 48h network - Enriched pathways',showCategory = 10)
+dotplot(enrichment_GO.rm_il1b, title='rm IL1B network - Enriched pathways',showCategory = 10)
+dotplot(enrichment_GO.rm_oxpapc, title='rm OxPAPC network - Enriched pathways',showCategory = 10)
+dotplot(enrichment_GO.rm_cocl2, title='rm CoCl2 network - Enriched pathways',showCategory = 10)
+dotplot(enrichment_GO.rm_oss, title='LSS+ALL network - Enriched pathways',showCategory = 10)
+```
+
+
+<!-- # Viper analysis with TFs from tables above -->
+
+<!-- ```{r} -->
+<!-- library(dorothea) -->
+<!-- library(viper) -->
+
+<!-- hs <- as.data.frame(dorothea::dorothea_hs) -->
+
+<!-- # hs_tf_rm_il1b <- hs[hs$tf %in% unique(tf_rm_il1b$TF),] -->
+<!-- # hs_tf_rm_oxpapc <- hs[hs$tf %in% unique(tf_rm_oxpapc$TF),] -->
+<!-- # hs_tf_rm_cocl2 <- hs[hs$tf %in% unique(tf_rm_cocl2$TF),] -->
+<!-- # hs_tf_rm_oss <- hs[hs$tf %in% unique(tf_rm_oss$TF),] -->
+<!-- # hs_tf_lss_pure <-hs[hs$tf %in% unique(tf_lss_pure$TF),] -->
+
+<!-- # Create regulon objects -->
+<!-- # vp_rm_il1b <- df2regulon(hs_tf_rm_il1b) -->
+<!-- # vp_rm_oxpapc <- df2regulon(hs_tf_rm_oxpapc) -->
+<!-- # vp_rm_cocl2 <- df2regulon(hs_tf_rm_cocl2) -->
+<!-- # vp_rm_oss <- df2regulon(hs_tf_rm_oss) -->
+<!-- # vp_lss_pure <- df2regulon(hs_tf_lss_pure) -->
+<!-- regulon <- df2regulon(dorothea_hs) -->
+
+<!-- # Create gene expression signatures -->
+<!-- signature_rm_il1b <- rowTtest(exp[,9:12], exp[,1:4]) -->
+<!-- signature_rm_il1b <- (qnorm(signature_rm_il1b$p.value/2, lower.tail = FALSE) * sign(signature_rm_il1b$statistic))[, 1] -->
+<!-- signature_rm_oxpapc <- rowTtest(exp[,13:16], exp[,1:4]) -->
+<!-- signature_rm_oxpapc <- (qnorm(signature_rm_oxpapc$p.value/2, lower.tail = FALSE) * sign(signature_rm_oxpapc$statistic))[, 1] -->
+<!-- signature_rm_cocl2 <- rowTtest(exp[,17:20], exp[,1:4]) -->
+<!-- signature_rm_cocl2 <- (qnorm(signature_rm_cocl2$p.value/2, lower.tail = FALSE) * sign(signature_rm_cocl2$statistic))[, 1] -->
+<!-- signature_rm_oss <- rowTtest(exp[,5:8], exp[,1:4]) -->
+<!-- signature_rm_oss <- (qnorm(signature_rm_oss$p.value/2, lower.tail = FALSE) * sign(signature_rm_oss$statistic))[, 1] -->
+<!-- signature_lss_pure <- rowTtest(exp[,21:24], exp[,1:4]) -->
+<!-- signature_lss_pure <- (qnorm(signature_lss_pure$p.value/2, lower.tail = FALSE) * sign(signature_lss_pure$statistic))[, 1] -->
+
+<!-- # Create null model -->
+<!-- nullmodel_rm_il1b <- ttestNull(exp[,9:12], exp[,1:4], per = 1000, repos = TRUE, verbose = FALSE) -->
+<!-- nullmodel_rm_oxpapc <- ttestNull(exp[,13:16], exp[,1:4], per = 1000, repos = TRUE, verbose = FALSE) -->
+<!-- nullmodel_rm_cocl2 <- ttestNull(exp[,17:20], exp[,1:4], per = 1000, repos = TRUE, verbose = FALSE) -->
+<!-- nullmodel_rm_oss <- ttestNull(exp[,5:8], exp[,1:4], per = 1000, repos = TRUE, verbose = FALSE) -->
+<!-- nullmodel_lss_pure <- ttestNull(exp[,21:24], exp[,1:4], per = 1000, repos = TRUE, verbose = FALSE) -->
+
+<!-- # Create msViper objects -->
+<!-- mrs_rm_il1b <- msviper(signature_rm_il1b,regulon,nullmodel_rm_il1b, verbose = FALSE) -->
+<!-- mrs_rm_il1b_ledge <- ledge(mrs_rm_il1b) -->
+<!-- mrs_rm_oxpapc <- msviper(signature_rm_oxpapc,regulon,nullmodel_rm_oxpapc, verbose = FALSE) -->
+<!-- mrs_rm_oxpapc_ledge <- ledge(mrs_rm_oxpapc) -->
+<!-- mrs_rm_cocl2 <- msviper(signature_rm_cocl2,regulon,nullmodel_rm_cocl2, verbose = FALSE) -->
+<!-- mrs_rm_cocl2_ledge <- ledge(mrs_rm_cocl2) -->
+<!-- mrs_rm_oss <- msviper(signature_rm_oss,regulon,nullmodel_rm_oss, verbose = FALSE) -->
+<!-- mrs_rm_oss_ledge <- ledge(mrs_rm_oss) -->
+<!-- mrs_lss_pure <- msviper(signature_lss_pure,regulon,nullmodel_lss_pure, verbose = FALSE) -->
+<!-- mrs_lss_pure_ledge <- ledge(mrs_lss_pure) -->
+<!-- ``` -->
+
+<!-- ## Shadow and Synergy analysis -->
+
+<!-- ```{r} -->
+<!-- # Shadow Analysis -->
+<!-- shadow_rm_il1b <- shadow(mrs_rm_il1b, regulators = 20) -->
+<!-- shadow_rm_oxpapc <- shadow(mrs_rm_oxpapc, regulators = 20) -->
+<!-- shadow_rm_cocl2 <- shadow(mrs_rm_cocl2, regulators = 20) -->
+<!-- shadow_rm_oss <- shadow(mrs_rm_oss, regulators = 20) -->
+<!-- shadow_lss_pure <- shadow(mrs_lss_pure, regulators = 20) -->
+
+<!-- # Synergy analysis -->
+<!-- comb_rm_il1b <- msviperCombinatorial(mrs_rm_il1b, regulators = 20) -->
+<!-- synergy_rm_il1b <- msviperSynergy(comb_rm_il1b) -->
+<!-- comb_rm_oxpapc <- msviperCombinatorial(mrs_rm_oxpapc, regulators = 20) -->
+<!-- synergy_rm_oxpapc <- msviperSynergy(comb_rm_oxpapc) -->
+<!-- comb_rm_cocl2 <- msviperCombinatorial(mrs_rm_cocl2, regulators = 20) -->
+<!-- synergy_rm_cocl2 <- msviperSynergy(comb_rm_cocl2) -->
+<!-- comb_rm_oss <- msviperCombinatorial(mrs_rm_oss, regulators = 20) -->
+<!-- synergy_rm_oss <- msviperSynergy(comb_rm_oss) -->
+<!-- comb_lss_pure <- msviperCombinatorial(mrs_lss_pure, regulators = 20) -->
+<!-- synergy_lss_pure <- msviperSynergy(comb_lss_pure) -->
+<!-- ``` -->
+
+<!-- # Create tables with significant information from msViper object -->
+<!-- ```{r} -->
+<!-- pvalue_rm_il1b <- as.data.frame(mrs_rm_il1b$es$p.value) %>% filter(mrs_rm_il1b$es$p.value < 0.05) -->
+<!-- colnames(pvalue_rm_il1b) <- c('p_value') -->
+<!-- nes_rm_il1b <- as.data.frame(mrs_rm_il1b$es$nes) -->
+<!-- nes_rm_il1b <- filter(nes_rm_il1b, rownames(nes_rm_il1b) %in% rownames(pvalue_rm_il1b)) -->
+<!-- colnames(nes_rm_il1b) <- c('NES') -->
+<!-- merge_p_nes_rm_il1b <- transform(merge(pvalue_rm_il1b,nes_rm_il1b,all=T,by='row.names'), row.names=Row.names) -->
+<!-- merge_p_nes_rm_il1b <- merge_p_nes_rm_il1b[order(merge_p_nes_rm_il1b$p_value),] -->
+<!-- merge_p_nes_rm_il1b <- merge_p_nes_rm_il1b[1:10,] -->
+<!-- write_csv(merge_p_nes_rm_il1b, 'tables/TFs/tfs_viper_rm_il1b.csv') -->
+
+<!-- pvalue_rm_oxpapc <- as.data.frame(mrs_rm_oxpapc$es$p.value) %>% filter(mrs_rm_oxpapc$es$p.value < 0.05) -->
+<!-- colnames(pvalue_rm_oxpapc) <- c('p_value') -->
+<!-- nes_rm_oxpapc <- as.data.frame(mrs_rm_oxpapc$es$nes) -->
+<!-- nes_rm_oxpapc <- filter(nes_rm_oxpapc, rownames(nes_rm_oxpapc) %in% rownames(pvalue_rm_oxpapc)) -->
+<!-- colnames(nes_rm_oxpapc) <- c('NES') -->
+<!-- merge_p_nes_rm_oxpapc <- transform(merge(pvalue_rm_oxpapc,nes_rm_oxpapc,all=T,by='row.names'), row.names=Row.names) -->
+<!-- merge_p_nes_rm_oxpapc <- merge_p_nes_rm_oxpapc[order(merge_p_nes_rm_oxpapc$p_value),] -->
+<!-- merge_p_nes_rm_oxpapc <- merge_p_nes_rm_oxpapc[1:10,] -->
+<!-- write_csv(merge_p_nes_rm_oxpapc, 'tables/TFs/tfs_viper_rm_oxpapc.csv') -->
+
+<!-- pvalue_rm_cocl2 <- as.data.frame(mrs_rm_cocl2$es$p.value) %>% filter(mrs_rm_cocl2$es$p.value < 0.05) -->
+<!-- colnames(pvalue_rm_cocl2) <- c('p_value') -->
+<!-- nes_rm_cocl2 <- as.data.frame(mrs_rm_cocl2$es$nes) -->
+<!-- nes_rm_cocl2 <- filter(nes_rm_cocl2, rownames(nes_rm_cocl2) %in% rownames(pvalue_rm_cocl2)) -->
+<!-- colnames(nes_rm_cocl2) <- c('NES') -->
+<!-- merge_p_nes_rm_cocl2 <- transform(merge(pvalue_rm_cocl2,nes_rm_cocl2,all=T,by='row.names'), row.names=Row.names) -->
+<!-- merge_p_nes_rm_cocl2 <- merge_p_nes_rm_cocl2[order(merge_p_nes_rm_cocl2$p_value),] -->
+<!-- merge_p_nes_rm_cocl2 <- merge_p_nes_rm_cocl2[1:10,] -->
+<!-- write_csv(merge_p_nes_rm_cocl2, 'tables/TFs/tfs_viper_rm_cocl2.csv') -->
+
+<!-- pvalue_rm_oss <- as.data.frame(mrs_rm_oss$es$p.value) %>% filter(mrs_rm_oss$es$p.value < 0.05) -->
+<!-- colnames(pvalue_rm_oss) <- c('p_value') -->
+<!-- nes_rm_oss <- as.data.frame(mrs_rm_oss$es$nes) -->
+<!-- nes_rm_oss <- filter(nes_rm_oss, rownames(nes_rm_oss) %in% rownames(pvalue_rm_oss)) -->
+<!-- colnames(nes_rm_oss) <- c('NES') -->
+<!-- merge_p_nes_rm_oss <- transform(merge(pvalue_rm_oss,nes_rm_oss,all=T,by='row.names'), row.names=Row.names) -->
+<!-- merge_p_nes_rm_oss <- merge_p_nes_rm_oss[order(merge_p_nes_rm_oss$p_value),] -->
+<!-- merge_p_nes_rm_oss <- merge_p_nes_rm_oss[1:20,] -->
+<!-- write_csv(merge_p_nes_rm_oss, 'tables/TFs/tfs_viper_rm_oss.csv') -->
+
+<!-- pvalue_lss_pure <- as.data.frame(mrs_lss_pure$es$p.value) %>% filter(mrs_lss_pure$es$p.value < 0.05) -->
+<!-- colnames(pvalue_lss_pure) <- c('p_value') -->
+<!-- nes_lss_pure <- as.data.frame(mrs_lss_pure$es$nes) -->
+<!-- nes_lss_pure <- filter(nes_lss_pure, rownames(nes_lss_pure) %in% rownames(pvalue_lss_pure)) -->
+<!-- colnames(nes_lss_pure) <- c('NES') -->
+<!-- merge_p_nes_lss_pure <- transform(merge(pvalue_lss_pure,nes_lss_pure,all=T,by='row.names'), row.names=Row.names) -->
+<!-- merge_p_nes_lss_pure <- merge_p_nes_lss_pure[order(merge_p_nes_lss_pure$p_value),] -->
+<!-- merge_p_nes_lss_pure <- merge_p_nes_lss_pure[1:10,] -->
+<!-- write_csv(merge_p_nes_lss_pure, 'tables/TFs/tfs_viper_lss_pure.csv') -->
+<!-- ``` -->
+
+<!-- # Filter targets from DOROTHEA TFs that are DEGs -->
+
+<!-- ```{r} -->
+<!-- #Filter and change necessary information in hs -->
+<!-- hs <- as.data.frame(dorothea::dorothea_hs) -->
+
+<!-- #remove confidence level different from A -->
+<!-- hs <- filter(hs, confidence == "A") -->
+
+<!-- #change 1 and -1 to activation and repression in hs -->
+<!-- hs$mor <- as.character(hs$mor) -->
+<!-- hs[hs$mor == 1,]$mor <- "Activation" -->
+<!-- hs[hs$mor == -1,]$mor <- "Repression" -->
+
+<!-- #Remove column confidence -->
+<!-- hs$confidence <- NULL -->
+
+<!-- #change columns names -->
+<!-- colnames(hs) <- c("TF","Target","Regulation") -->
+
+<!-- #filter TF from msviper and Targets thar are DEGs -->
+<!-- hs_tf_rm_il1b <- hs[hs$TF %in% unique(merge_p_nes_rm_il1b$Row.names) & hs$Target %in% rm_IL1BvsOSS_ALL_72h_DEG$SYMBOL,] -->
+<!-- hs_tf_rm_oxpapc <- hs[hs$TF %in% unique(merge_p_nes_rm_oxpapc$Row.names) & hs$Target %in% rm_OxPAPCvsOSS_ALL_72h_DEG$SYMBOL,] -->
+<!-- hs_tf_rm_cocl2 <- hs[hs$TF %in% unique(merge_p_nes_rm_cocl2$Row.names) & hs$Target %in% rm_CoCl2vsOSS_ALL_72h_DEG$SYMBOL,] -->
+<!-- hs_tf_rm_oss <- hs[hs$TF %in% unique(merge_p_nes_rm_oss$Row.names) & hs$Target %in% rm_OSSvsOSS_ALL_72h_DEG$SYMBOL,] -->
+<!-- hs_tf_lss_pure <- hs[hs$TF %in% unique(merge_p_nes_lss_pure$Row.names) & hs$Target %in% LSS_48hvsOSS_ALL_72h_DEG$SYMBOL,] -->
+
+<!-- #Insert fold change columns -->
+<!-- hs_tf_rm_il1b$logFC_TF <- rm_IL1BvsOSS_ALL_72h_allgenes[match(hs_tf_rm_il1b$TF, rm_IL1BvsOSS_ALL_72h_allgenes$SYMBOL),]$logFC -->
+<!-- hs_tf_rm_il1b$logFC_Target <- rm_IL1BvsOSS_ALL_72h_DEG[match(hs_tf_rm_il1b$Target, rm_IL1BvsOSS_ALL_72h_DEG$SYMBOL),]$logFC -->
+<!-- hs_tf_rm_oxpapc$logFC_TF <- rm_OxPAPCvsOSS_ALL_72h_allgenes[match(hs_tf_rm_oxpapc$TF, rm_OxPAPCvsOSS_ALL_72h_allgenes$SYMBOL),]$logFC -->
+<!-- hs_tf_rm_oxpapc$logFC_Target <- rm_OxPAPCvsOSS_ALL_72h_DEG[match(hs_tf_rm_oxpapc$Target, rm_OxPAPCvsOSS_ALL_72h_DEG$SYMBOL),]$logFC -->
+<!-- hs_tf_rm_cocl2$logFC_TF <- rm_CoCl2vsOSS_ALL_72h_allgenes[match(hs_tf_rm_cocl2$TF, rm_CoCl2vsOSS_ALL_72h_allgenes$SYMBOL),]$logFC -->
+<!-- hs_tf_rm_cocl2$logFC_Target <- rm_CoCl2vsOSS_ALL_72h_DEG[match(hs_tf_rm_cocl2$Target, rm_CoCl2vsOSS_ALL_72h_DEG$SYMBOL),]$logFC -->
+<!-- hs_tf_rm_oss$logFC_TF <- rm_OSSvsOSS_ALL_72h_allgenes[match(hs_tf_rm_oss$TF, rm_OSSvsOSS_ALL_72h_allgenes$SYMBOL),]$logFC -->
+<!-- hs_tf_rm_oss$logFC_Target <- rm_OSSvsOSS_ALL_72h_DEG[match(hs_tf_rm_oss$Target, rm_OSSvsOSS_ALL_72h_DEG$SYMBOL),]$logFC -->
+<!-- hs_tf_lss_pure$logFC_TF <- LSS_48hvsOSS_ALL_72h_allgenes[match(hs_tf_lss_pure$TF, LSS_48hvsOSS_ALL_72h_allgenes$SYMBOL),]$logFC -->
+<!-- hs_tf_lss_pure$logFC_Target <- LSS_48hvsOSS_ALL_72h_DEG[match(hs_tf_lss_pure$Target, LSS_48hvsOSS_ALL_72h_DEG$SYMBOL),]$logFC -->
+
+<!-- # Merge TFs from viper and dorothea with TFs from TRRUST that are DEGs -->
+<!-- hs_tf_rm_il1b <- rbind(tf_rm_il1b, hs_tf_rm_il1b) %>% write_csv("tables/TFs/merged_degs_tfs_viper_rm_il1b.csv")#TOP 10 FROM VIPER -->
+<!-- hs_tf_rm_oxpapc <- rbind(tf_rm_oxpapc,hs_tf_rm_oxpapc) %>% write_csv("tables/TFs/merged_degs_tfs_viper_rm_oxpapc.csv")#TOP 10 FROM VIPER -->
+<!-- hs_tf_rm_cocl2 <- rbind(tf_rm_cocl2,hs_tf_rm_cocl2) %>% write_csv("tables/TFs/merged_degs_tfs_viper_rm_cocl2.csv")#TOP 10 FROM VIPER -->
+<!-- hs_tf_rm_oss <- rbind(tf_rm_oss,hs_tf_rm_oss) %>% write_csv("tables/TFs/merged_degs_tfs_viper_rm_oss.csv") #TOP 20 FROM VIPER -->
+<!-- hs_tf_lss_pure <- rbind(tf_lss_pure,hs_tf_lss_pure) %>% write_csv("tables/TFs/merged_degs_tfs_viper_lss_pure.csv") #TOP 10 FROM VIPER -->
+<!-- ``` -->
+

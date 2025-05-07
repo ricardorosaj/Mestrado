@@ -1,0 +1,897 @@
+---
+title: "Comparison with LSS_48h"
+author: "Ricardo Rosa Junior"
+date: '13/04/2022'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Libraries for executing code:
+```{r,warning=FALSE,message=FALSE}
+#BiocManager::install("clariomdhumantranscriptcluster.db")
+#BiocManager::install("sva")
+#BiocManager::install("BatchQC")
+#BiocManager::install("rhdf5")
+
+library(oligo)
+library(affy)
+library(tidyr)
+#library(arrayQualityMetrics)
+library(ggplot2)
+library(Biobase)
+library(pheatmap)
+library(clariomdhumantranscriptcluster.db)
+library(dplyr)
+library(viridis)
+library(limma)
+library(cartography)
+library(paletteer)
+library(rcartocolor)
+library(sva)
+library(tidyverse)
+#library(BatchQC)
+library(rhdf5)
+library(tools)
+library(dendextend)
+library(preprocessCore)
+library(vioplot)
+library(ggrepel)
+library(ggfortify)
+library(factoextra)
+library(circlize)
+library(tibble)
+library(ComplexHeatmap)
+library(clusterProfiler)
+library(readr)
+library(VennDiagram)
+library(plyr)
+library(colorRamp2)
+```
+
+# 1. Set working directory, check file names and read cel files
+```{r, warning=FALSE,message=FALSE}
+setwd("samples_msc_no_OSSALL")
+list_out = list.celfiles(getwd(),full.names=TRUE, pattern = "CEL")
+files.cel<- read.celfiles(list_out)
+```
+
+## Setting cel files info
+Sample ed43_hcaec_F09_MV.CEL was removed for not passing statistical tests after normalizations, background corrections and calibrations.
+
+All samples were exposed to OSS+OxPAPC+CoCL2+IL1B for at least 24h (OSS_ALL were exposed for 72h). After 24h treatment, the conditions were modified and samples were exposed for 48h to the new conditions.
+```{r, warning=FALSE,message=FALSE}
+##Conditions
+pData(files.cel)[,1]<- c("OSS_ALL_72h", "OSS_ALL_72h","OSS_ALL_72h","OSS_ALL_72h",
+                        "rm_OSS", "rm_OSS","rm_OSS","rm_OSS",
+                        "rm_IL1B","rm_IL1B","rm_IL1B","rm_IL1B",
+                        "rm_OxPAPC","rm_OxPAPC","rm_OxPAPC","rm_OxPAPC",
+                        "rm_CoCl2","rm_CoCl2","rm_CoCl2","rm_CoCl2",
+                        "LSS_48h","LSS_48h","LSS_48h","LSS_48h")
+##Sample names
+pData(files.cel)[,2]<- c("OSS_ALL_72h_1", "OSS_ALL_72h_2","OSS_ALL_72h_3","OSS_ALL_72h_4",
+                        "rm_OSS_1", "rm_OSS_2","rm_OSS_3","rm_OSS_4",
+                        "rm_IL1B_1","rm_IL1B_2","rm_IL1B_3","rm_IL1B_4",
+                        "rm_OxPAPC_1","rm_OxPAPC_2","rm_OxPAPC_3","rm_OxPAPC_4",
+                        "rm_CoCl2_1","rm_CoCl2_2","rm_CoCl2_3","rm_CoCl2_4",
+                        "LSS_48h_1","LSS_48h_2","LSS_48h_3","LSS_48h_4")
+
+## Change column names
+colnames(pData(files.cel))[1]="Conditions"
+colnames(pData(files.cel))[2]="Samples_name"
+
+pheno <- pData(files.cel)
+pheno$Samples = rownames(pheno)
+write_csv(pheno, file='samples_msc_no_OSSALL/pheno_lss_48h.csv')
+pheno$Samples = NULL
+pheno
+```
+
+
+# 2. Quality control check
+The quality metrics assess reproducibility, identify apparent outlier arrays and compute measures of signal-to-noise ratio.
+```{r eval=FALSE, message=FALSE, warning=FALSE}
+#Quality control check prior to normalization
+arrayQualityMetrics(expressionset = files.cel,
+                  force = TRUE, do.logtransform = TRUE,
+                  intgroup = c("Conditions"),
+                  reporttitle = "Quality metrics - MSC vs LSS 48h")
+```
+
+```{r, eval=FALSE,message=FALSE}
+#Create probe level models
+fit.plm <- fitProbeLevelModel(files.cel)
+```
+
+Explanation about RLE analysis: Values are computed for each probeset by comparing the expression value on each array against the median expression value for that probeset across all arrays. Assuming that most genes are not changing in expression across arrays means ideally most of these RLE values will be near 0.
+
+```{r, eval=FALSE}
+#Visualize the results of the model accounting for probe and sample effects
+RLE.data<- RLE(fit.plm)
+
+```
+
+Explanation about NUSE: Standard error estimates obtained for each gene on each array from fitPLM are taken and standardized across arrays so that the median standard error for that genes is 1 across all arrays.
+
+```{r, eval=FALSE}
+#NUSE plot
+oligo::NUSE(fit.plm)
+
+```
+
+## PCA prior normalization (Group cluster) and boxplot of expression deviation
+```{r, warning=FALSE,message=FALSE,echo=FALSE}
+
+exp_raw <- log2(Biobase::exprs(files.cel))
+PCA_norm_raw <- prcomp(t(exp_raw), scale. = T, center=T)
+
+percentVar <- round(100*PCA_norm_raw$sdev^2/sum(PCA_norm_raw$sdev^2),1)
+sd_ratio <- sqrt(percentVar[2] / percentVar[1])
+
+dataGG <- data.frame(PC1 = PCA_norm_raw$x[,1], PC2 = PCA_norm_raw$x[,2],
+                    Condition = pheno$Conditions)
+
+ggplot(dataGG, aes(PC1, PC2)) +
+      geom_point(aes(colour = Condition)) +
+  ggtitle("PCA plot of the log-transformed raw expression data") +
+  xlab(paste0("PC1, VarExp: ", percentVar[1], "%")) +
+  ylab(paste0("PC2, VarExp: ", percentVar[2], "%")) +
+  theme(plot.title = element_text(hjust = 0.5))+
+  coord_fixed(ratio = sd_ratio)
+```
+
+```{r, echo=FALSE}
+oligo::boxplot(files.cel)
+```
+
+# 3. Data normalization: RMA normalization, quality control and probe filtering 
+Background correction, quantile normalization
+```{r}
+norm.file.cel <- oligo::rma(files.cel, normalize = T)
+```
+## Relative Log Expression data quality analysis:
+The RLE is performed by calculating the median log2 intensity of every transcript across all arrays.
+Boxes with a larger extension therefore indicate an unusually high deviation from the median in a lot of transcripts, suggesting that these arrays are different from most of the others in some way.
+
+Boxes that are shifted in y-direction indicate a systematically higher or lower expression of the majority of transcripts in comparison to most of the other arrays. This could be caused by quality issues or batch effects.
+```{r}
+row_medians_assayData <- 
+  Biobase::rowMedians(as.matrix(Biobase::exprs(norm.file.cel)))
+
+RLE_data <- sweep(Biobase::exprs(norm.file.cel), 1, row_medians_assayData)
+
+RLE_data <- as.data.frame(RLE_data)
+RLE_data_gathered <- 
+  tidyr::gather(RLE_data, arrays, log2_expression_deviation)
+
+ggplot2::ggplot(RLE_data_gathered, aes(arrays,
+                                       log2_expression_deviation)) + 
+  geom_boxplot(outlier.shape = NA) + 
+  ylim(c(-2, 2)) + 
+  theme(axis.text.x = element_text(colour = "aquamarine4", 
+                                  angle = 60, size = 6.5, hjust = 1 ,
+                                  face = "bold"))
+```
+
+
+Boxplot of expression deviation after normalization
+```{r, echo=FALSE}
+oligo::boxplot(norm.file.cel)
+```
+
+PCA analysis for normalized data:
+```{r, message=FALSE, echo=FALSE, warning=FALSE}
+exp_norm <- Biobase::exprs(norm.file.cel)
+PCA <- prcomp(t(exp_norm), scale = FALSE)
+
+percentVar <- round(100*PCA$sdev^2/sum(PCA$sdev^2),1)
+sd_ratio <- sqrt(percentVar[2] / percentVar[1])
+
+dataGG <- data.frame(PC1 = PCA$x[,1], PC2 = PCA$x[,2],
+                    Conditions = pheno$Conditions,
+                    Samples_name = pheno$Samples_name)
+
+
+ggplot(dataGG, aes(PC1, PC2)) +
+  geom_point(aes(colour = Conditions)) +
+  geom_label_repel(data=subset(dataGG, Samples_name == "LSS_3"), # for plotting remove sample label
+                  aes(label = Samples_name),
+                  size= 3,
+                  box.padding   = 1,
+                  #point.padding = 2,
+                  segment.color = 'grey50')+
+  ggtitle("PCA plot of the calibrated, summarized data") +
+  xlab(paste0("PC1, VarExp: ", percentVar[1], "%")) +
+  ylab(paste0("PC2, VarExp: ", percentVar[2], "%")) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  coord_fixed(ratio = sd_ratio)
+```
+Heatmap clustering analysis (sample-to-sample distances):
+```{r fig.height=8, fig.width=10}
+library(stringr)
+conditions_names <- pheno$Conditions
+
+annotation_for_heatmap <- 
+  data.frame(Conditions = conditions_names)
+
+row.names(annotation_for_heatmap) <- row.names(pheno)
+
+dists <- as.matrix(dist(t(exp_norm), method = "manhattan"))
+
+rownames(dists) <- row.names(pheno)
+hmcol <- rev(colorRampPalette(RColorBrewer::brewer.pal(9, "YlOrRd"))(255))
+colnames(dists) <- NULL
+diag(dists) <- NA
+rownames(dists) <- pheno$Samples_name
+
+ann_colors <- list(Conditions = viridis(6))
+names(ann_colors$Conditions) <- unique(conditions_names)
+
+pheatmap(dists, col = (hmcol), 
+         annotation_row = annotation_for_heatmap,
+         annotation_colors = ann_colors,
+         legend = TRUE, 
+         treeheight_row = 0,
+         legend_breaks = c(min(dists, na.rm = TRUE), 
+                         max(dists, na.rm = TRUE)), 
+         legend_labels = (c("small distance", "large distance")),
+         main = "Clustering heatmap for the calibrated samples")
+```
+
+## Filter lowly expressed probes
+Filtering Based on Intensity post quantile normalization
+We now filter out lowly expressed genes. Microarray data commonly show a large number of probes in the background intensity range. These probes also do not change much across arrays. Hence they combine a low variance with a low intensity. Thus, they could end up being detected as differentially expressed although they are barely above the “detection” limit and are not very informative in general.
+
+```{r, echo= FALSE}
+norm.expr.median<- rowMedians(Biobase::exprs(norm.file.cel))
+
+hist_res<- hist(norm.expr.median, 100, freq = FALSE, 
+                main = "Histogram of the median intensities", 
+                border = "antiquewhite4",
+                xlab = "Median intensities")
+manual_threshold <- 3.0
+abline(v = manual_threshold, col = "red", lwd = 2)
+```
+
+```{r, warning=FALSE,message=FALSE}
+#Define the number of replicated in treatment to define the cutoff
+
+no_of_samples <-table(paste0(pData(norm.file.cel)$Conditions))
+
+no_of_samples 
+
+samples_cutoff <- min(no_of_samples)
+
+#Function to define the number of probes that do not passes minimum median fluorescence intensity in the data
+idx_man_threshold <- apply(Biobase::exprs(norm.file.cel), 1,
+                           function(x){
+                             sum(x > manual_threshold) >= samples_cutoff})
+table(idx_man_threshold)
+
+#Subset the data with only probes that passes the filtering step
+
+array.norm.filtered<- subset(norm.file.cel, idx_man_threshold)
+
+oligo::boxplot(array.norm.filtered)
+```
+
+
+# 4. Annotate probe to gene names and symbols and remove NA symbols
+```{r}
+annot.clariom.ht <- AnnotationDbi::select(clariomdhumantranscriptcluster.db,
+                                       keys = (featureNames(array.norm.filtered)),
+                                       columns = c("SYMBOL", "GENENAME"),
+                                       keytype = "PROBEID")
+
+# Remove NA gene names that downloaded from the database
+annotation_clariom <- subset(annot.clariom.ht, !is.na(SYMBOL))
+annotation_clariom<-annotation_clariom[!duplicated(annotation_clariom$SYMBOL),]
+write_csv(annotation_clariom,file='samples_msc_no_OSSALL/annotation_clariom.csv')
+```
+
+## Steps for removing multiple mapping from probes
+To remove different probes capture sequences for the same gene at different positions 
+```{r}
+#1- Group data using the probeID
+anno_grouped <- annotation_clariom %>%
+  dplyr::group_by(PROBEID) 
+
+#2- Check which probes have multiple gene mapping
+anno_summarized <- anno_grouped %>%
+  dplyr::summarize(no_of_matches = n_distinct(SYMBOL)) 
+
+#3- Remove those who have more than 1 mapping per gene
+anno_filtered <- anno_summarized %>%
+  filter(no_of_matches > 1) 
+
+#4- Define which IDs are going to be excluded
+ids_to_exlude <- (featureNames(array.norm.filtered) %in% anno_filtered$PROBEID)
+
+#5- Generate the final dataset without multiple mapping probes
+array.norm.filtered.nomapping <- array.norm.filtered %>%
+  subset(!ids_to_exlude)
+
+#Add the row names as a featureData for the expressionset objetc
+fData(array.norm.filtered.nomapping)$PROBEID <- rownames(fData(array.norm.filtered.nomapping))
+
+#Add the columns GENE and SYMBOL to the featureData for only the probes that have been filtered
+fData(array.norm.filtered.nomapping)<- dplyr::left_join(fData(array.norm.filtered.nomapping), 
+                                                        annotation_clariom, "PROBEID")
+
+#restore the probeIDs names to the dataset
+rownames(fData(array.norm.filtered.nomapping)) <- fData(array.norm.filtered.nomapping)$PROBEID 
+
+array.norm.filtered.nomapping<- array.norm.filtered.nomapping %>%
+  subset(!is.na(fData(array.norm.filtered.nomapping)$SYMBOL))
+
+#symbols in expression dataset
+anno_array.norm.filtered.nomapping = as.data.frame(exprs(array.norm.filtered.nomapping))
+anno_array.norm.filtered.nomapping$Genes = rownames(anno_array.norm.filtered.nomapping)
+anno_array.norm.filtered.nomapping = anno_array.norm.filtered.nomapping %>% select(Genes, everything())
+rownames(anno_array.norm.filtered.nomapping) = fData(array.norm.filtered.nomapping)$SYMBOL
+```
+## Plot Hierarchial clustering heatmap
+```{r fig.height=9, fig.width=6}
+anno_array.norm.filtered.nomapping$Genes <- NULL
+colnames(anno_array.norm.filtered.nomapping) <- c("OSS_ALL_72h_1", "OSS_ALL_72h_2","OSS_ALL_72h_3","OSS_ALL_72h_4",
+                        "rm_OSS_1", "rm_OSS_2","rm_OSS_3","rm_OSS_4",
+                        "rm_IL1B_1","rm_IL1B_2","rm_IL1B_3","rm_IL1B_4",
+                        "rm_OxPAPC_1","rm_OxPAPC_2","rm_OxPAPC_3","rm_OxPAPC_4",
+                        "rm_CoCl2_1","rm_CoCl2_2","rm_CoCl2_3","rm_CoCl2_4",
+                        "LSS_48h_1","LSS_48h_2","LSS_48h_3","LSS_48h_4")
+
+scale_rows <- function (x) {
+  m = apply(x, 1, mean, na.rm = T)
+  s = apply(x, 1, sd, na.rm = T)
+  return((x - m)/s)
+}
+
+zscore_exp <- scale_rows(anno_array.norm.filtered.nomapping)
+
+#zscore_exp <- anno_array.norm.filtered.nomapping %>% t() %>% scale() %>% t()
+
+zscore_exp <- as.matrix(zscore_exp)
+
+col_fun  <- colorRamp2(c(-5, 0, 5), c("purple", "white", "firebrick"))
+
+df_colnames <- as.data.frame((colnames(zscore_exp)))
+colnames(df_colnames)[1]<- "Comparissons"
+
+##prepare heatmap plot
+##add colnames
+haTerms_colnames <- HeatmapAnnotation(
+  df = df_colnames,
+  #col = col_fun,
+  Term = anno_text(
+    colnames(zscore_exp),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold')),
+  annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+  annotation_name_side = 'left')
+##change legend sizes
+Term = anno_text(
+  colnames(zscore_exp),
+  rot = 45,
+  just = 'right',
+  gp = gpar(fontsize = 13, fontface = 'bold'))
+
+zscore_exp_plot <- Heatmap(zscore_exp,
+                         name = 'z-score',
+                         col = col_fun,
+                         cluster_rows = TRUE,
+                         cluster_row_slices = TRUE,
+                         show_row_dend = TRUE,
+                         #row_title = 'Genes',
+                         row_title_side = 'left',
+                         row_title_gp = gpar(fontsize = 11, fontface = 'bold'),
+                         row_title_rot = 90,
+                         show_row_names = F,
+                         row_names_gp = gpar(fontsize = 11, fontface = 'bold'),
+                         row_names_side = 'left',
+                         row_dend_width = unit(20, 'mm'),
+                         
+                         cluster_columns = T,
+                         show_column_dend = T,
+                         column_title = 'Hierarchical Clustering - Global Expression',
+                         column_title_side = 'top',
+                         column_title_gp = gpar(fontsize = 13, fontface = 'bold'),
+                         column_title_rot = 0,
+                         show_column_names = TRUE,
+                         show_heatmap_legend = TRUE,
+                         column_names_gp = gpar(fontsize = 13, fontface = 'bold'),
+                         column_names_rot = 90,##change the angle of column name
+                         
+                         clustering_distance_rows = 'euclidean',
+                         clustering_method_rows = 'ward.D2')#,
+
+zscore_exp_plot
+```
+
+```{r}
+write_csv(anno_array.norm.filtered.nomapping, file = 'samples_msc_no_OSSALL/array.norm.filtered.nomapping.csv')
+anno_array.norm.filtered.nomapping = as.data.frame(anno_array.norm.filtered.nomapping)
+anno_array.norm.filtered.nomapping = cbind(GeneSymbol = rownames(anno_array.norm.filtered.nomapping),anno_array.norm.filtered.nomapping)
+write_tsv(anno_array.norm.filtered.nomapping, file='samples_msc_no_OSSALL/treated_expression_for_coexp.tsv')
+
+#write classes file
+classes = as.data.frame(pheno)
+classes$SampleName = rownames(classes)
+classes$Class = classes$Conditions
+classes$Conditions = NULL
+classes$Samples_name = NULL
+write_tsv(classes,file='samples_msc_no_OSSALL/classes_for_coexp.tsv')
+```
+
+```{r}
+exp_norm <- as.data.frame(exprs(array.norm.filtered.nomapping))
+PCA <- prcomp(t(exp_norm), scale = FALSE)
+
+percentVar <- round(100*PCA$sdev^2/sum(PCA$sdev^2),1)
+sd_ratio <- sqrt(percentVar[2] / percentVar[1])
+
+dataGG <- data.frame(PC1 = PCA$x[,1], PC2 = PCA$x[,2],
+                    Conditions = pheno$Conditions,
+                    Samples_name = pheno$Samples_name)
+
+
+ggplot(dataGG, aes(PC1, PC2)) +
+  geom_point(aes(colour = Conditions)) +
+  geom_label_repel(data=subset(dataGG, Samples_name == "LSS_3"), # for plotting remove sample label
+                  aes(label = Samples_name),
+                  size= 3,
+                  box.padding   = 1,
+                  #point.padding = 2,
+                  segment.color = 'grey50')+
+  ggtitle("PCA plot of the calibrated, summarized data") +
+  xlab(paste0("PC1, VarExp: ", percentVar[1], "%")) +
+  ylab(paste0("PC2, VarExp: ", percentVar[2], "%")) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  coord_fixed(ratio = sd_ratio)
+```
+
+
+Run final quality control check after normalization and visualization
+```{r, eval=TRUE, warning=FALSE,message=FALSE}
+arrayQualityMetrics(expressionset = norm.file.cel,
+                  force = TRUE, do.logtransform = TRUE,
+                  intgroup = c("Conditions"),
+                  reporttitle = "Quality metrics - MSC vs LSS 48h - normalized")
+```
+
+# 5. Differential Expression Analysis
+
+```{r, paged.print=TRUE}
+#1- Define the groups to compare
+groups = pData(array.norm.filtered.nomapping)$Conditions
+f = factor(groups,levels=c("OSS_ALL_72h","rm_OSS","rm_IL1B","rm_OxPAPC","rm_CoCl2","LSS_48h"))
+
+#2- Create Design Matrix
+design = model.matrix(~ 0 + f)
+colnames(design) = c("OSS_ALL_72h","rm_OSS","rm_IL1B","rm_OxPAPC","rm_CoCl2","LSS_48h")
+
+#3- Fit the contrasts to Lineal models
+#Choose wheter fit model to corrected or non-corrected data 
+data.fit = lmFit(array.norm.filtered.nomapping,design)
+data.fit$coefficients[1:10,]
+
+#4- Define the contrasts (what to compare)
+contrast.matrix = makeContrasts(OSS_ALL_72h-LSS_48h,
+                                rm_OSS-LSS_48h,
+                                rm_IL1B-LSS_48h,
+                                rm_OxPAPC-LSS_48h,
+                                rm_CoCl2-LSS_48h,
+                                levels=design)
+
+#5- Fit the contrasts
+data.fit.con = contrasts.fit(data.fit,contrast.matrix)
+data.fit.eb = eBayes(data.fit.con)
+
+
+#6-DEGs summary
+DEresults = decideTests(data.fit.eb,coef=1,method="separate",adj.p.Val=0.05,lfc=1.3,adjust.method="BH")
+summary(DEresults)
+``` 
+
+Generate comparisons and save lists of DEGs.
+```{r}
+#save all comparison
+OSS_ALL_72hvsLSS_48h <- topTreat(data.fit.eb, coef=1, n=Inf, adjust.method = 'BH')
+write.csv(OSS_ALL_72hvsLSS_48h, "tables/no_OSSALL/OSS_ALL_72hvsLSS_48h_allgenes.csv")
+
+rm_OSSvsLSS_48h <- topTreat(data.fit.eb, coef=2, n=Inf, adjust.method = 'BH')
+write.csv(rm_OSSvsLSS_48h, "tables/no_OSSALL/rm_OSSvsLSS_48h_allgenes.csv")
+
+rm_IL1BvsLSS_48h <- topTreat(data.fit.eb, coef=3, n=Inf, adjust.method = 'BH')
+write.csv(rm_IL1BvsLSS_48h, "tables/no_OSSALL/rm_IL1BvsLSS_48h_allgenes.csv")
+
+rm_OxPAPCvsLSS_48h <- topTreat(data.fit.eb, coef=4, n=Inf, adjust.method = 'BH')
+write.csv(rm_OxPAPCvsLSS_48h, "tables/no_OSSALL/rm_OxPAPCvsLSS_48h_allgenes.csv")
+
+rm_CoCl2vsLSS_48h <- topTreat(data.fit.eb, coef=5, n=Inf, adjust.method = 'BH')
+write.csv(rm_CoCl2vsLSS_48h, "tables/no_OSSALL/rm_CoCl2vsLSS_48h_allgenes.csv")
+
+#save threshold tables
+OSS_ALL_72hvsLSS_48h_DEG <- OSS_ALL_72hvsLSS_48h %>%
+   filter(abs(logFC)>= 1.3, adj.P.Val<0.05)
+   write.csv(OSS_ALL_72hvsLSS_48h_DEG,"tables/no_OSSALL/OSS_ALL_72hvsLSS_48h_DEGs.csv")
+ OSS_ALL_72hvsLSS_48h %>%
+   filter(logFC>= 1.3, adj.P.Val<0.05) %>%
+   write.csv("tables/no_OSSALL/OSS_ALL_72hvsLSS_48h_UP_DEGs.csv")
+ OSS_ALL_72hvsLSS_48h %>%
+   filter(logFC<= 1.3, adj.P.Val<0.05) %>%
+   write.csv("tables/no_OSSALL/OSS_ALL_72hvsLSS_48h_DOWN_DEGs.csv")
+
+#All DEGs
+rm_OSSvsLSS_48h_DEG <- rm_OSSvsLSS_48h %>%
+   filter(abs(logFC)>= 1.3, adj.P.Val<0.05)
+   write.csv(rm_OSSvsLSS_48h_DEG,"tables/no_OSSALL/rm_OSSvsLSS_48h_DEGs.csv")
+#Up-regulated DEGs 
+ rm_OSSvsLSS_48h %>%
+   filter(logFC>= 1.3, adj.P.Val<0.05) %>%
+   write.csv("tables/no_OSSALL/rm_OSSvsLSS_48h_UP_DEGs.csv")
+#Down-regulated DEGs 
+ rm_OSSvsLSS_48h %>%
+   filter(logFC<= 1.3, adj.P.Val<0.05) %>%
+   write.csv("tables/no_OSSALL/rm_OSSvsLSS_48h_DOWN_DEGs.csv")
+
+rm_IL1BvsLSS_48h_DEG <- rm_IL1BvsLSS_48h %>%
+   filter(abs(logFC)>= 1.3, adj.P.Val<0.05)
+   write.csv(rm_IL1BvsLSS_48h_DEG,"tables/no_OSSALL/rm_IL1BvsLSS_48h_DEGs.csv")
+ rm_IL1BvsLSS_48h %>%
+   filter(logFC>= 1.3, adj.P.Val<0.05) %>%
+   write.csv("tables/no_OSSALL/rm_IL1BvsLSS_48h_UP_DEGs.csv")
+ rm_IL1BvsLSS_48h %>%
+   filter(logFC<= 1.3, adj.P.Val<0.05) %>%
+   write.csv("tables/no_OSSALL/rm_IL1BvsLSS_48h_DOWN_DEGs.csv")
+
+rm_OxPAPCvsLSS_48h_DEG <- rm_OxPAPCvsLSS_48h %>%
+   filter(abs(logFC)>= 1.3, adj.P.Val<0.05)
+   write.csv(rm_OxPAPCvsLSS_48h_DEG,"tables/no_OSSALL/rm_OxPAPCvsLSS_48h_DEGs.csv")
+ rm_OxPAPCvsLSS_48h %>%
+   filter(logFC>= 1.3, adj.P.Val<0.05) %>%
+   write.csv("tables/no_OSSALL/rm_OxPAPCvsLSS_48h_UP_DEGs.csv")
+ rm_OxPAPCvsLSS_48h %>%
+   filter(logFC<= 1.3, adj.P.Val<0.05) %>%
+   write.csv("tables/no_OSSALL/rm_OxPAPCvsLSS_48h_DOWN_DEGs.csv")
+
+rm_CoCl2vsLSS_48h_DEG <- rm_CoCl2vsLSS_48h %>%
+   filter(abs(logFC)>= 1.3, adj.P.Val<0.05)
+   write.csv(rm_CoCl2vsLSS_48h_DEG,"tables/no_OSSALL/rm_CoCl2vsLSS_48h_DEGs.csv")
+ rm_CoCl2vsLSS_48h %>%
+   filter(logFC>= 1.3, adj.P.Val<0.05) %>%
+   write.csv("tables/no_OSSALL/rm_CoCl2vsLSS_48h_UP_DEGs.csv")
+ rm_CoCl2vsLSS_48h %>%
+   filter(logFC<= 1.3, adj.P.Val<0.05) %>%
+   write.csv("tables/no_OSSALL/rm_CoCl2vsLSS_48h_DOWN_DEGs.csv")
+```
+
+## Obtain genes that are up regulated in OSS+ALL and are not DEGs in rm OSS
+```{r fig.height=22, fig.width=6}
+ups <- OSS_ALL_72hvsLSS_48h_DEG %>% filter(logFC >= 1.3, adj.P.Val<0.05)
+not_degs_rm_oss <- LSS_ALLvsLSS_48h %>% filter(logFC <= 1.3, adj.P.Val<0.05)
+interesting_genes <- ups[ups$SYMBOL %in% not_degs_rm_oss$SYMBOL,c("SYMBOL")]
+
+TFs_list <- read.table(file = 'tables/Emergents/trrust_rawdata.human.tsv', sep = '\t', header = FALSE)
+TFs_list <- unique(TFs_list$V1)
+
+plot_heatmap_markers <- function(genes,heat_title,logfc_range){
+  genes_exp <- as.data.frame(matrix(0,nrow = length(genes), ncol = 5, dimnames = list(genes,c("OSS+ALL","rm OSS","rm IL1B","rm OxPAPC","rm CoCl2"))))
+  
+  oss_all <- logfc_oss_all[logfc_oss_all$SYMBOL %in% genes,c("SYMBOL","logFC")]
+  rm_oss <- logfc_rm_oss[logfc_rm_oss$SYMBOL %in% genes,c("SYMBOL","logFC")]
+  rm_cocl2 <- logfc_rm_cocl2[logfc_rm_cocl2$SYMBOL %in% genes,c("SYMBOL","logFC")]
+  rm_oxpapc <- logfc_rm_oxpapc[logfc_rm_oxpapc$SYMBOL %in% genes,c("SYMBOL","logFC")]
+  rm_il1b <- logfc_rm_il1b[logfc_rm_il1b$SYMBOL %in% genes,c("SYMBOL","logFC")]
+  
+  genes_exp[,"OSS+ALL"] <- oss_all[match(rownames(genes_exp),oss_all$SYMBOL),"logFC"]
+  genes_exp[,"rm OSS"] <- rm_oss[match(rownames(genes_exp),rm_oss$SYMBOL),"logFC"]
+  genes_exp[,"rm CoCl2"] <- rm_cocl2[match(rownames(genes_exp),rm_cocl2$SYMBOL),"logFC"]
+  genes_exp[,"rm OxPAPC"] <- rm_oxpapc[match(rownames(genes_exp),rm_oxpapc$SYMBOL),"logFC"]
+  genes_exp[,"rm IL1B"] <- rm_il1b[match(rownames(genes_exp),rm_il1b$SYMBOL),"logFC"]
+  
+  genes_exp <- na.omit(genes_exp)
+  
+  for (i in 1:dim(genes_exp)[1]) {
+    if (rownames(genes_exp)[i] %in% TFs_list) {
+      rownames(genes_exp)[i] <- paste0(rownames(genes_exp)[i],'*')
+    }
+  }
+  
+  genes_exp <- as.matrix(genes_exp)
+  
+  col_fun  <- colorRamp2(logfc_range, c("purple", "white", "firebrick"))
+  
+  df_colnames <- as.data.frame((colnames(genes_exp)))
+  colnames(df_colnames)[1]<- "Comparissons"
+  
+  ##prepare heatmap plots
+  ##add colnames
+  haTerms_colnames <- HeatmapAnnotation(
+    df = df_colnames,
+    #col = col_fun,
+    Term = anno_text(
+      colnames(genes_exp),
+      rot = 45,
+      just = 'right',
+      gp = gpar(fontsize = 13, fontface = 'bold')),
+    annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+    annotation_name_side = 'left')
+  ##change legend sizes
+  Term = anno_text(
+    colnames(genes_exp),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold'))
+  
+  heat_mat_plot <- Heatmap(genes_exp,
+                           name = 'logFC',
+                           col = col_fun,
+                           cluster_rows = T,
+                           cluster_row_slices = F,
+                           show_row_dend = T,
+                           row_title = "Genes",
+                           row_title_side = 'left',
+                           row_title_gp = gpar(fontsize = 11, fontface = 'bold'),
+                           row_title_rot = 90,
+                           show_row_names = T,
+                           row_names_gp = gpar(fontsize = 11, fontface = 'bold'),
+                           row_names_side = 'left',
+                           row_dend_width = unit(20, 'mm'),
+                           cell_fun = function(j, i, x, y, width, height, fill) {
+                              grid.text(sprintf("%.1f", genes_exp[i, j]), x, y, gp = gpar(fontsize = 10))},
+                           cluster_columns = F,
+                           show_column_dend = FALSE,
+                           column_title = heat_title,
+                           column_title_side = 'top',
+                           #column_names_side = "top",
+                           column_title_gp = gpar(fontsize = 13, fontface = 'bold'),
+                           column_title_rot = 0,
+                           show_column_names = TRUE,
+                           show_heatmap_legend = TRUE,
+                           column_names_gp = gpar(fontsize = 8, fontface = 'bold'),
+                           column_names_rot = 45,##change the angle of column name
+                           
+                           clustering_distance_rows = 'euclidean',
+                           clustering_method_rows = 'ward.D2',
+                           rect_gp = gpar(col = "black", lwd = 0.5),)#,
+  
+  heat_mat_plot
+}
+plot_heatmap_markers(interesting_genes,"UP genes in OSS+ALL and not DEGs in rm OSS",c(-2,0,4))
+```
+
+## Volcano Plots
+
+```{r fig.height=4, fig.width=8}
+# Use tables with all genes 
+##filter top 10 up and downreg
+plot_volcano <- function(df, title, logFCup, logFCdown){
+  upgenes<-subset(df, df$adj.P.Val<0.05 & logFC>=logFCup)
+  downgenes<-subset(df, df$adj.P.Val<0.05 & logFC<=logFCdown)
+  siggenes <- bind_rows(upgenes, downgenes)
+  
+  #selecct whats up and down
+  PE<-df %>%
+  select("SYMBOL", "logFC", "adj.P.Val") %>%
+  mutate(gene_type = case_when(adj.P.Val<0.05 & logFC>=1.3 ~ "up",
+                               adj.P.Val<0.05 & logFC<=-1.3 ~"down",
+                               TRUE ~ "ns"))
+  #Select color scheme
+  cols <- c("up" = "#DC143C", "down" = "#736AFF", "ns" = "grey") 
+  sizes <- c("up" = 2, "down" = 2, "ns" = 1) 
+  alphas <- c("up" = 1, "down" = 1, "ns" = 0.5)
+  
+  ggplot(data = PE,
+       aes(x =logFC ,
+           y = -log10(adj.P.Val ))) + 
+  geom_point(aes(colour = gene_type), 
+             alpha = 0.4, 
+             shape = 16,
+             size = 1) + 
+  geom_point(data = upgenes,
+             shape = 21,
+             size = 2, 
+             fill = "#DC143C", 
+             colour = "black") + 
+  geom_point(data = downgenes,
+             shape = 21,
+             size = 2, 
+             fill = "#736AFF", 
+             colour = "black") + 
+  geom_hline(yintercept = -log10(0.05) ,
+             linetype = "dashed")+ 
+  geom_vline(xintercept =c(-1.3, 1.3),
+             linetype = "dashed") +
+  geom_label_repel(data = siggenes, # Add labels last to appear as the top layer  
+                   aes(label = SYMBOL),
+                   force = 2,
+                   nudge_y = 1,
+                   max.overlaps = 18) +
+  scale_colour_manual(values = cols) + 
+  scale_x_continuous(limits = c(-8, 8))+
+  labs(title = title,
+       x = "log2FC",
+       y = "-Log10 (P-value)",
+       colour = "Expression change")+
+  theme_minimal()+
+  theme(panel.border = element_rect(colour = "black", fill = NA, linewidth= 0.5),    
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank())
+
+}
+OSS_ALL_72hvsLSS_48h_DEG <- as.data.frame(read_csv("tables/no_OSSALL/OSS_ALL_72hvsLSS_48h_DEGs.csv"))
+LSS_ALLvsLSS_48h_DEG <- as.data.frame(read_csv("tables/no_OSSALL/LSS_ALLvsLSS_48h_DEGs.csv"))
+OSS_OxPAPC_CoCl2_rm_IL1BvsLSS_48h_DEG <- as.data.frame(read_csv("tables/no_OSSALL/OSS_OxPAPC_CoCl2_rm_IL1BvsLSS_48h_DEGs.csv"))
+OSS_IL1B_CoCl2_rm_OxPAPCvsLSS_48h_DEG <- as.data.frame(read_csv("tables/no_OSSALL/OSS_IL1B_CoCl2_rm_OxPAPCvsLSS_48h_DEGs.csv"))
+OSS_IL1B_OxPAPC_rm_CoCl2vsLSS_48h_DEG <- as.data.frame(read_csv("tables/no_OSSALL/OSS_IL1B_OxPAPC_rm_CoCl2vsLSS_48h_DEGs.csv"))
+rownames(OSS_ALL_72hvsLSS_48h_DEG) <- OSS_ALL_72hvsLSS_48h_DEG$PROBEID
+rownames(LSS_ALLvsLSS_48h_DEG) <- LSS_ALLvsLSS_48h_DEG$PROBEID
+rownames(OSS_OxPAPC_CoCl2_rm_IL1BvsLSS_48h_DEG) <- OSS_OxPAPC_CoCl2_rm_IL1BvsLSS_48h_DEG$PROBEID
+rownames(OSS_IL1B_CoCl2_rm_OxPAPCvsLSS_48h_DEG) <- OSS_IL1B_CoCl2_rm_OxPAPCvsLSS_48h_DEG$PROBEID
+rownames(OSS_IL1B_OxPAPC_rm_CoCl2vsLSS_48h_DEG) <- OSS_IL1B_OxPAPC_rm_CoCl2vsLSS_48h_DEG$PROBEID
+
+plot_volcano(OSS_ALL_72hvsLSS_48h,"OSS+ALL 72h vs LSS 48h", 4.5, -5)
+plot_volcano(LSS_ALLvsLSS_48h,"rm OSS vs LSS 48h", 4, -4)
+plot_volcano(OSS_OxPAPC_CoCl2_rm_IL1BvsLSS_48h,"rm IL1B vs LSS 48h", 3.5, -4.5)
+plot_volcano(OSS_IL1B_CoCl2_rm_OxPAPCvsLSS_48h,"rm OxPAPC vs LSS 48h", 5.5, -5)
+plot_volcano(OSS_IL1B_OxPAPC_rm_CoCl2vsLSS_48h,"rm CoCl2 vs LSS 48h", 5.5, -5)
+```
+
+## Venn Diagram of DEGs
+
+```{r}
+venn_degs <- list('OSS+ALL (633)' = OSS_ALL_72hvsLSS_48h_DEG$SYMBOL,
+                  'rm OSS (550)' = LSS_ALLvsLSS_48h_DEG$SYMBOL,
+                  'rm IL1B (563)' = OSS_OxPAPC_CoCl2_rm_IL1BvsLSS_48h_DEG$SYMBOL,
+                  'rm OxPAPC (808)' = OSS_IL1B_CoCl2_rm_OxPAPCvsLSS_48h_DEG$SYMBOL,
+                  'rm CoCl2 (805)' = OSS_IL1B_OxPAPC_rm_CoCl2vsLSS_48h_DEG$SYMBOL)
+
+#venn_intersec= venn(venn_degs, show.plot = TRUE)
+#intersec = attributes(venn_intersec)$intersections
+
+venn.diagram(
+  x = venn_degs,
+  category.names = c("OSS+ALL (633)" , "rm OSS (550)" , "rm IL1B (563)", "rm OxPAPC (808)", "rm CoCl2 (805)"),
+  filename = 'images/venn_DEGS_vs_LSS48h.png',
+  output = TRUE ,
+          imagetype="png" ,
+          height = 720 , 
+          width = 720 , 
+          resolution = 300,
+          compression = "lzw",
+          lwd = 1,
+          col=c("#498F61", '#779FA1', '#E0CBA8', '#ff6542', '#564154'),
+          fill = c(alpha("#498F61",0.3), alpha('#779FA1',0.3), alpha('#E0CBA8',0.3),alpha("#ff6542",0.3), alpha('#564154',0.3)),
+          cex = 0.8,
+          fontfamily = "sans",
+          cat.cex = 0.3,
+          cat.default.pos = "outer",
+          cat.pos = c(-27, 27, 135, 120, 120),
+          cat.dist = c(0.055, 0.055, 0.055, 0.055, 0.055),
+          cat.fontfamily = "sans",
+          cat.col = c("#498F61", '#779FA1', '#E0CBA8','#ff6542', '#564154')
+        )
+```
+
+
+## Print information of MYC and RUNX1 genes
+
+```{r}
+myc <- data.frame("MYC",
+                  OSS_ALL_72hvsLSS_48h[OSS_ALL_72hvsLSS_48h$SYMBOL == "MYC","logFC"],
+                  LSS_ALLvsLSS_48h[LSS_ALLvsLSS_48h$SYMBOL == "MYC","logFC"],
+                  OSS_OxPAPC_CoCl2_rm_IL1BvsLSS_48h[OSS_OxPAPC_CoCl2_rm_IL1BvsLSS_48h$SYMBOL == "MYC","logFC"],
+                  OSS_IL1B_CoCl2_rm_OxPAPCvsLSS_48h[OSS_IL1B_CoCl2_rm_OxPAPCvsLSS_48h$SYMBOL == "MYC","logFC"],
+                  OSS_IL1B_OxPAPC_rm_CoCl2vsLSS_48h[OSS_IL1B_OxPAPC_rm_CoCl2vsLSS_48h$SYMBOL == "MYC","logFC"])
+colnames(myc) <- c("Gene","OSS_ALL_72h","rm OSS","rm IL1B","rm OxPAPC","rm CoCl2")
+
+runx1 <- data.frame("RUNX1",
+                    OSS_ALL_72hvsLSS_48h[OSS_ALL_72hvsLSS_48h$SYMBOL == "RUNX1","logFC"],
+                    LSS_ALLvsLSS_48h[LSS_ALLvsLSS_48h$SYMBOL == "RUNX1","logFC"],
+                    OSS_OxPAPC_CoCl2_rm_IL1BvsLSS_48h[OSS_OxPAPC_CoCl2_rm_IL1BvsLSS_48h$SYMBOL == "RUNX1","logFC"],
+                    OSS_IL1B_CoCl2_rm_OxPAPCvsLSS_48h[OSS_IL1B_CoCl2_rm_OxPAPCvsLSS_48h$SYMBOL == "RUNX1","logFC"],
+                    OSS_IL1B_OxPAPC_rm_CoCl2vsLSS_48h[OSS_IL1B_OxPAPC_rm_CoCl2vsLSS_48h$SYMBOL == "RUNX1","logFC"])
+colnames(runx1) <- c("Gene","OSS_ALL_72h","rm OSS","rm IL1B","rm OxPAPC","rm CoCl2")
+
+myc_runx1 <- rbind(myc,runx1)
+rownames(myc_runx1) <- c("MYC","RUNX1")
+myc_runx1$Gene <- NULL
+myc_runx1 <- as.matrix(myc_runx1)
+
+barplot(myc_runx1 , beside=T , legend.text=T,col=c("blue" , "skyblue"), ylab = "logFC", xlab = "Conditions", width = 20, main = "MYC and RUNX1 expression vs LSS 48h")+
+  abline(h = 1.3, col = "red")
+```
+
+Heatmap of shared DEGs between comparrisons
+
+```{r, warning=FALSE, message=FALSE}
+#create matrix
+all_go <- unique(c(OSS_ALL_72hvsLSS_48h_DEG$PROBEID, LSS_ALLvsLSS_48h_DEG$PROBEID, OSS_OxPAPC_CoCl2_rm_IL1BvsLSS_48h_DEG$PROBEID,
+                   OSS_IL1B_CoCl2_rm_OxPAPCvsLSS_48h_DEG$PROBEID, OSS_IL1B_OxPAPC_rm_CoCl2vsLSS_48h_DEG$PROBEID))
+
+heat_mat <- as.data.frame(matrix(0, nrow = length(all_go), ncol = 5, dimnames = list(all_go, c("OSS+ALL 72h","rm OSS","rm IL1B","rm OxPAPC","rm CoCl2"))))
+
+#populate matrix
+
+oss_all_go <- OSS_ALL_72hvsLSS_48h_DEG[rownames(OSS_ALL_72hvsLSS_48h_DEG) %in% rownames(heat_mat), c('PROBEID','logFC')]
+heat_mat$`OSS+ALL 72h` <- oss_all_go[match(rownames(heat_mat), oss_all_go$PROBEID),]$logFC
+
+rm_oss <- LSS_ALLvsLSS_48h_DEG[rownames(LSS_ALLvsLSS_48h_DEG) %in% rownames(heat_mat), c('PROBEID','logFC')]
+heat_mat$`rm OSS` <- rm_oss[match(rownames(heat_mat), rm_oss$PROBEID),]$logFC
+
+rm_il1b <- OSS_OxPAPC_CoCl2_rm_IL1BvsLSS_48h_DEG[rownames(OSS_OxPAPC_CoCl2_rm_IL1BvsLSS_48h_DEG) %in% rownames(heat_mat), c('PROBEID','logFC')]
+heat_mat$`rm IL1B` <- rm_il1b[match(rownames(heat_mat), rm_il1b$PROBEID),]$logFC
+
+rm_oxpapc <- OSS_IL1B_CoCl2_rm_OxPAPCvsLSS_48h_DEG[rownames(OSS_IL1B_CoCl2_rm_OxPAPCvsLSS_48h_DEG) %in% rownames(heat_mat), c('PROBEID','logFC')]
+heat_mat$`rm OxPAPC` <- rm_oxpapc[match(rownames(heat_mat), rm_oxpapc$PROBEID),]$logFC
+
+rm_cocl2 <- OSS_IL1B_OxPAPC_rm_CoCl2vsLSS_48h_DEG[rownames(OSS_IL1B_OxPAPC_rm_CoCl2vsLSS_48h_DEG) %in% rownames(heat_mat), c('PROBEID','logFC')]
+heat_mat$`rm CoCl2` <- rm_cocl2[match(rownames(heat_mat), rm_cocl2$PROBEID),]$logFC
+
+#Re-order columns
+heat_mat[is.na(heat_mat)] <- 0
+```
+
+Create the heatmap
+
+```{r fig.height=12, fig.width=6}
+heat_mat <- as.matrix(heat_mat)
+
+col_fun  <- colorRamp2(c(-6, 0, 6), c("purple", "white", "firebrick"))
+
+df_colnames <- as.data.frame((colnames(heat_mat)))
+colnames(df_colnames)[1]<- "Comparissons"
+
+##prepare heatmap plot
+##add colnames
+haTerms_colnames <- HeatmapAnnotation(
+  df = df_colnames,
+  #col = col_fun,
+  Term = anno_text(
+    colnames(heat_mat),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold')),
+  annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+  annotation_name_side = 'left')
+##change legend sizes
+Term = anno_text(
+  colnames(heat_mat),
+  rot = 45,
+  just = 'right',
+  gp = gpar(fontsize = 13, fontface = 'bold'))
+
+heat_mat_plot <- Heatmap(heat_mat,
+                         name = 'logFC',
+                         col = col_fun,
+                         cluster_rows = TRUE,
+                         cluster_row_slices = TRUE,
+                         show_row_dend = TRUE,
+                         row_title = 'Genes',
+                         row_title_side = 'left',
+                         row_title_gp = gpar(fontsize = 11, fontface = 'bold'),
+                         row_title_rot = 90,
+                         show_row_names = F,
+                         row_names_gp = gpar(fontsize = 11, fontface = 'bold'),
+                         row_names_side = 'left',
+                         row_dend_width = unit(20, 'mm'),
+                         
+                         cluster_columns = F,
+                         show_column_dend = F,
+                         column_title = '1367 DEGs from all comparisons',
+                         column_title_side = 'top',
+                         column_title_gp = gpar(fontsize = 13, fontface = 'bold'),
+                         column_title_rot = 0,
+                         show_column_names = TRUE,
+                         show_heatmap_legend = TRUE,
+                         column_names_gp = gpar(fontsize = 8, fontface = 'bold'),
+                         column_names_rot = 45,##change the angle of column name
+                         
+                         clustering_distance_rows = 'euclidean',
+                         clustering_method_rows = 'ward.D2')#,
+
+heat_mat_plot
+```

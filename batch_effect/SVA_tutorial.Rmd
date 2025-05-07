@@ -1,0 +1,104 @@
+---
+title: "SVA tutorial for Batch Correction"
+author: "Ricardo Rosa Junior"
+date: "08/03/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# How to use SVA package for implemmenting batch correction analysis using ComBat
+
+## Libraries for executing code:
+```{r,warning=FALSE,message=FALSE}
+library(sva)
+library(bladderbatch)
+data(bladderdata)
+library(pamr)
+library(limma)
+```
+
+SVA package assumes there are two types of variables that are being considered: (1) adjustment variables and (2) variables of interest. For example, in a gene expression study the variable of interest might an indicator of cancer versus control. The adjustment variables could be the age of the patients, the sex of the patients, and a variable like the date the arrays were processed.
+Two model matrices must be made: the “full model” and the “null model”.
+The null model is a model matrix that includes terms for all of the adjustment variables but not the variables of interest. The full model includes terms for both the adjustment variables and the variables of interest. 
+The assumption is that you will be trying to analyze the association between the variables of interest and gene expression, adjusting for the adjustment variables. The model matrices can be created using the model.matrix
+The following example uses data from "bladderbatch" library, but is analogous to different gene expression data, where the expression matrix uses the samples as columns and genes as rows:
+
+```{r}
+pheno = pData(bladderEset)
+edata = exprs(bladderEset)
+```
+
+Next, we create the full model matrix, considering both adjustment variables and variables of interest (in the case of OSS/LSS study, variables of interest are the conditions of samples). Because there are multiple levels of the "cancer status" variable, we treat as factor:
+```{r}
+mod = model.matrix(~as.factor(cancer), data=pheno)
+#For null model, because we don't have adjustment variables, we create it as matrix with 1's
+mod0 = model.matrix(~1,data=pheno)
+```
+
+# Applying the sva function to estimate batch and other artifacts
+
+First, we estimate the number of latent factors in the data and then use this information to apply the 'sva' function to expression data:
+```{r}
+n.sv = num.sv(edata,mod,method="leek")
+n.sv
+#Apply to sva
+svobj = sva(edata,mod,mod0,n.sv=n.sv)
+```
+# Adjusting for surrogate variables using the limma package
+
+First we calculate the p-values for each row of the expression set and then we adjust for the surrogate variables:
+```{r, warning=FALSE,message=FALSE}
+modSv = cbind(mod,svobj$sv)
+mod0Sv = cbind(mod0,svobj$sv)
+pValuesSv = f.pvalue(edata,modSv,mod0Sv)
+qValuesSv = p.adjust(pValuesSv,method="BH")
+```
+
+Now we adjust the linear model to the data using limma function 'lmFit':
+```{r}
+fit = lmFit(edata,modSv)
+```
+
+# Applying the ComBat function to adjust for known batches
+
+Finally, we can use the ComBat function for adjusting the data for the known batches:
+```{r}
+batch = pheno$batch
+# model matrix is created only for variables of interest
+modcombat = model.matrix(~1, data=pheno)
+combat_edata = ComBat(dat=edata, batch=batch, mod=modcombat, par.prior=TRUE, prior.plots=FALSE, mean.only=TRUE, ref.batch=1)
+```
+
+'mean.only=TRUE' is used when milder batches are expected or in cases where the variances are expected to be different across batches due to the biology. ref.batch parameter, which allows users to select one batch as a reference to which other batches will be adjusted. 
+Specifically, the means and variances of the non-reference batches will be adjusted to make the mean/variance of the reference batch. 
+This is a useful feature for cases where one batch is larger or better quality.
+
+# Using BatchQC for exploratory analysis and correction with SVA
+
+BatchQC generates a report where you can execute different batch corrections (SVA and ComBat) on data, check clustering and expression levels before and after batch correction. The necessary inputs are the expression matrix and the batches ordered equally as the matrix columns. The 'condition' argument contains a vector with the conditions of each sample ordered the same as the batches (in this case, conditions are the cancer status):
+
+```{r, warning=FALSE,message=FALSE}
+library(BatchQC)
+batch = pheno$batch
+cond = pheno$cancer
+# The next line is commented for creating this html file
+# batchQC(edata, batch, condition = cond) 
+```
+
+If results with ComBat are not satisfactory, BatchQC possess the functions for creating a sva object on the data and correcting directly the expression matrix:
+
+```{r}
+modmatrix = model.matrix(~as.factor(cond), data=pheno)
+# Create SVA object
+sva.object <- batchQC_sva(edata, mod=modmatrix)
+# Correct the expression matrix
+correctedExpression <- batchQC_svregress_adjusted(edata,modmatrix,sva.object)
+```
+
+With the corrected expression matrix in hand, we now can execute DEGs analysis.
+
+# References
+Leek, Jeffrey T., et al. "The sva package for removing batch effects and other unwanted variation in high-throughput experiments." Bioinformatics 28.6 (2012): 882-883.

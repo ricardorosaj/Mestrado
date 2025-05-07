@@ -1,0 +1,628 @@
+---
+title: "CEmi tools"
+author: "Sarah Mattioli"
+date: "21/10/2022"
+output: html_document
+---
+
+```{r}
+library(pacman)
+p_load(CEMiTool)
+
+#source(here::here("Base.R"))
+```
+
+# Create sample annotation dfand load necessary files
+```{r}
+Exp <- read.csv("array.norm.filtered.nomapping.csv")
+rownames(Exp) <- Exp$GeneSymbol
+Exp <- Exp[,-c(1,2)]
+
+SampleName <- c("OSS_ALL_72h_1", "OSS_ALL_72h_2","OSS_ALL_72h_3","OSS_ALL_72h_4",
+                "LSS_ALL_1", "LSS_ALL_2","LSS_ALL_3","LSS_ALL_4",
+                "OSS_OxPAPC_CoCl2_rm_IL1B_1","OSS_OxPAPC_CoCl2_rm_IL1B_2","OSS_OxPAPC_CoCl2_rm_IL1B_3","OSS_OxPAPC_CoCl2_rm_IL1B_4",
+                "OSS_IL1B_CoCl2_rm_OxPAPC_1","OSS_IL1B_CoCl2_rm_OxPAPC_2","OSS_IL1B_CoCl2_rm_OxPAPC_3","OSS_IL1B_CoCl2_rm_OxPAPC_4",
+                "OSS_IL1B_OxPAPC_rm_CoCl2_1","OSS_IL1B_OxPAPC_rm_CoCl2_2","OSS_IL1B_OxPAPC_rm_CoCl2_3","OSS_IL1B_OxPAPC_rm_CoCl2_4",
+                "LSS_48h_1","LSS_48h_2","LSS_48h_3","LSS_48h_4")
+
+Class <- c("OSS_ALL_72h", "OSS_ALL_72h","OSS_ALL_72h","OSS_ALL_72h",
+          "LSS_ALL", "LSS_ALL","LSS_ALL","LSS_ALL",
+          "OSS_OxPAPC_CoCl2_rm_IL1B","OSS_OxPAPC_CoCl2_rm_IL1B","OSS_OxPAPC_CoCl2_rm_IL1B","OSS_OxPAPC_CoCl2_rm_IL1B",
+          "OSS_IL1B_CoCl2_rm_OxPAPC","OSS_IL1B_CoCl2_rm_OxPAPC","OSS_IL1B_CoCl2_rm_OxPAPC","OSS_IL1B_CoCl2_rm_OxPAPC",
+          "OSS_IL1B_OxPAPC_rm_CoCl2","OSS_IL1B_OxPAPC_rm_CoCl2","OSS_IL1B_OxPAPC_rm_CoCl2","OSS_IL1B_OxPAPC_rm_CoCl2",
+          "LSS_48h","LSS_48h","LSS_48h","LSS_48h")
+
+colnames(Exp) <- SampleName
+
+sample_annot <- data.frame(SampleName, Class)
+```
+
+
+As a default, the cemitool function first performs a filtering of the gene expression data before running the remaining analyses. This filtering is done in accordance to gene variance. In this example the filtering step has reduced the gene number to 257.
+
+"No beta value found. It seems that the soft thresholding approach used by CEMiTool is not suitable for your data."
+The beta value is a parameter that lies in the core of the weighted gene co-expression network analysis (WGCNA). Originally, this parameter needed to be defined by the user. Therefore, the original CEMiTool R package implemented an automatic beta value selection procedure that uses the gene expression data to select the best value on behalf of the user. In some cases, however, the CEMiTool automatic procedure fails to find the best solution and cannot keep on with the co-expression analysis and this error is raised.
+
+https://bmcbioinformatics.biomedcentral.com/articles/10.1186/1471-2105-9-559/tables/1
+
+```{r}
+cem <- cemitool(
+                Exp,
+                sample_annot,
+                filter = TRUE,
+                filter_pval = 0.05,
+                apply_vst = FALSE,
+                eps = 0.1,
+                cor_method = c("pearson", "spearman"),
+                cor_function = "cor",
+                network_type = "unsigned",
+                tom_type = "signed",
+                set_beta = 16,
+                force_beta = FALSE,
+                sample_name_column = "SampleName",
+                class_column = "Class",
+                merge_similar = TRUE,
+                rank_method = "mean",
+                ora_pval = 0.05,
+                gsea_scale = TRUE,
+                gsea_min_size = 15,
+                gsea_max_size = 1000,
+                min_ngen = 30,
+                diss_thresh = 0.8,
+                plot = TRUE,
+                plot_diagnostics = TRUE,
+                order_by_class = TRUE,
+                center_func = "mean",
+                directed = FALSE,
+                verbose = FALSE
+)
+
+cem
+
+#Extract genes from modules
+
+m1 <- module_genes(cem, module = "M1")
+m2 <- module_genes(cem, module = "M2")
+m3 <- module_genes(cem, module = "M3")
+m4 <- module_genes(cem, module = "M4")
+m5 <- module_genes(cem, module = "M5")
+m6 <- module_genes(cem, module = "M6")
+
+# Check if genes from modules are DEGs
+LSS_ALLvsOSS_ALL_72h_DEG <- read_csv("tables/LSS_ALLvsOSS_ALL_72h_DEGs.csv")
+OSS_OxPAPC_CoCL2_rm_IL1BvsOSS_ALL_72h_DEG <- read_csv("tables/OSS_OxPAPC_CoCL2_rm_IL1BvsOSS_ALL_72h_DEGs.csv")
+OSS_IL1B_CoCL2_rm_OxPAPCvsOSS_ALL_72h_DEG <- read_csv("tables/OSS_IL1B_CoCL2_rm_OxPAPCvsOSS_ALL_72h_DEGs.csv")
+OSS_IL1B_OxPAPC_rm_CoCl2vsOSS_ALL_72h_DEG <- read_csv("tables/OSS_IL1B_OxPAPC_rm_CoCl2vsOSS_ALL_72h_DEGs.csv")
+LSS_48hvsOSS_ALL_72h_DEG <- read_csv("tables/LSS_48hvsOSS_ALL_72h_DEGs.csv")
+degs <- rbind(LSS_ALLvsOSS_ALL_72h_DEG,OSS_OxPAPC_CoCL2_rm_IL1BvsOSS_ALL_72h_DEG,OSS_IL1B_CoCL2_rm_OxPAPCvsOSS_ALL_72h_DEG,OSS_IL1B_OxPAPC_rm_CoCl2vsOSS_ALL_72h_DEG,LSS_48hvsOSS_ALL_72h_DEG)
+degs <- unique(degs$SYMBOL)
+
+# All genes expression
+exp <- read.csv("array.norm.filtered.nomapping.csv")
+exp$Genes <- NULL
+rownames(exp) <- exp$GeneSymbol
+exp$GeneSymbol <- NULL
+colnames(exp) <- c("OSS_ALL_72h_1", "OSS_ALL_72h_2","OSS_ALL_72h_3","OSS_ALL_72h_4",
+                        "LSS_ALL_1", "LSS_ALL_2","LSS_ALL_3","LSS_ALL_4",
+                        "OSS_OxPAPC_CoCl2_rm_IL1B_1","OSS_OxPAPC_CoCl2_rm_IL1B_2","OSS_OxPAPC_CoCl2_rm_IL1B_3","OSS_OxPAPC_CoCl2_rm_IL1B_4",
+                        "OSS_IL1B_CoCl2_rm_OxPAPC_1","OSS_IL1B_CoCl2_rm_OxPAPC_2","OSS_IL1B_CoCl2_rm_OxPAPC_3","OSS_IL1B_CoCl2_rm_OxPAPC_4",
+                        "OSS_IL1B_OxPAPC_rm_CoCl2_1","OSS_IL1B_OxPAPC_rm_CoCl2_2","OSS_IL1B_OxPAPC_rm_CoCl2_3","OSS_IL1B_OxPAPC_rm_CoCl2_4",
+                        "LSS_48h_1","LSS_48h_2","LSS_48h_3","LSS_48h_4")
+
+# Create column to check if gene is DEG or not
+m1$is_deg <- m1$genes %in% degs
+m2$is_deg <- m2$genes %in% degs
+m3$is_deg <- m3$genes %in% degs
+m4$is_deg <- m4$genes %in% degs
+m5$is_deg <- m5$genes %in% degs
+m6$is_deg <- m6$genes %in% degs
+
+#Calculate z-score
+exp <- t(exp)
+for (i in 1:length(colnames(exp))) {
+  exp[,i] <- (exp[,i]-mean(exp[,i]))/sd(exp[,i])
+}
+exp <- t(exp)
+```
+
+# Create heatmaps for genes in each module
+```{r}
+library(ComplexHeatmap)
+library(circlize)
+#M2
+exp_m1 <- exp[rownames(exp) %in% m1$genes,]
+exp_m1 <- as.matrix(exp_m1)
+exp_m1 <- exp_m1[,c(21,22,23,24,5,6,7,8,1,2,3,4,13,14,15,16,17,18,19,20,9,10,11,12)]
+
+col_fun  <- colorRamp2(c(-3, 0, 3), c("purple", "white", "firebrick"))
+
+df_colnames <- as.data.frame((colnames(exp_m1)))
+colnames(df_colnames)[1]<- "Comparissons"
+
+##prepare heatmap plot
+##add colnames
+haTerms_colnames <- HeatmapAnnotation(
+  df = df_colnames,
+  #col = col_fun,
+  Term = anno_text(
+    colnames(exp_m1),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold')),
+  annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+  annotation_name_side = 'left')
+##change legend sizes
+Term = anno_text(
+  colnames(exp_m1),
+  rot = 45,
+  just = 'right',
+  gp = gpar(fontsize = 13, fontface = 'bold'))
+
+exp_m1_plot <- Heatmap(exp_m1,
+                         name = 'z-score',
+                         col = col_fun,
+                         cluster_rows = TRUE,
+                         cluster_row_slices = TRUE,
+                         show_row_dend = TRUE,
+                         row_title = 'Genes',
+                         row_title_side = 'left',
+                         row_title_gp = gpar(fontsize = 11, fontface = 'bold'),
+                         row_title_rot = 90,
+                         show_row_names = FALSE,
+                         row_names_gp = gpar(fontsize = 11, fontface = 'bold'),
+                         row_names_side = 'left',
+                         row_dend_width = unit(20, 'mm'),
+                         
+                         cluster_columns = FALSE,
+                         show_column_dend = FALSE,
+                         column_title = '224 genes from M1',
+                         column_title_side = 'top',
+                         column_title_gp = gpar(fontsize = 13, fontface = 'bold'),
+                         column_title_rot = 0,
+                         show_column_names = TRUE,
+                         show_heatmap_legend = TRUE,
+                         column_names_gp = gpar(fontsize = 8, fontface = 'bold'),
+                         column_names_rot = 45,##change the angle of column name
+                         
+                         clustering_distance_rows = 'euclidean',
+                         clustering_method_rows = 'ward.D2')#,
+
+exp_m1_plot
+```
+```{r}
+#M2
+exp_m2 <- exp[rownames(exp) %in% m2$genes,]
+exp_m2 <- as.matrix(exp_m2)
+exp_m2 <- exp_m2[,c(21,22,23,24,5,6,7,8,1,2,3,4,13,14,15,16,17,18,19,20,9,10,11,12)]
+
+col_fun  <- colorRamp2(c(-3, 0, 3), c("purple", "white", "firebrick"))
+
+df_colnames <- as.data.frame((colnames(exp_m2)))
+colnames(df_colnames)[1]<- "Comparissons"
+
+##prepare heatmap plot
+##add colnames
+haTerms_colnames <- HeatmapAnnotation(
+  df = df_colnames,
+  #col = col_fun,
+  Term = anno_text(
+    colnames(exp_m2),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold')),
+  annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+  annotation_name_side = 'left')
+##change legend sizes
+Term = anno_text(
+  colnames(exp_m2),
+  rot = 45,
+  just = 'right',
+  gp = gpar(fontsize = 13, fontface = 'bold'))
+
+exp_m2_plot <- Heatmap(exp_m2,
+                         name = 'z-score',
+                         col = col_fun,
+                         cluster_rows = TRUE,
+                         cluster_row_slices = TRUE,
+                         show_row_dend = TRUE,
+                         row_title = 'Genes',
+                         row_title_side = 'left',
+                         row_title_gp = gpar(fontsize = 11, fontface = 'bold'),
+                         row_title_rot = 90,
+                         show_row_names = FALSE,
+                         row_names_gp = gpar(fontsize = 11, fontface = 'bold'),
+                         row_names_side = 'left',
+                         row_dend_width = unit(20, 'mm'),
+                         
+                         cluster_columns = FALSE,
+                         show_column_dend = FALSE,
+                         column_title = '96 genes from M2',
+                         column_title_side = 'top',
+                         column_title_gp = gpar(fontsize = 13, fontface = 'bold'),
+                         column_title_rot = 0,
+                         show_column_names = TRUE,
+                         show_heatmap_legend = TRUE,
+                         column_names_gp = gpar(fontsize = 8, fontface = 'bold'),
+                         column_names_rot = 45,##change the angle of column name
+                         
+                         clustering_distance_rows = 'euclidean',
+                         clustering_method_rows = 'ward.D2')#,
+
+exp_m2_plot
+```
+```{r}
+#M3
+exp_m3 <- exp[rownames(exp) %in% m3$genes,]
+exp_m3 <- as.matrix(exp_m3)
+exp_m3 <- exp_m3[,c(21,22,23,24,5,6,7,8,1,2,3,4,13,14,15,16,17,18,19,20,9,10,11,12)]
+
+col_fun  <- colorRamp2(c(-3, 0, 3), c("purple", "white", "firebrick"))
+
+df_colnames <- as.data.frame((colnames(exp_m3)))
+colnames(df_colnames)[1]<- "Comparissons"
+
+##prepare heatmap plot
+##add colnames
+haTerms_colnames <- HeatmapAnnotation(
+  df = df_colnames,
+  #col = col_fun,
+  Term = anno_text(
+    colnames(exp_m3),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold')),
+  annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+  annotation_name_side = 'left')
+##change legend sizes
+Term = anno_text(
+  colnames(exp_m3),
+  rot = 45,
+  just = 'right',
+  gp = gpar(fontsize = 13, fontface = 'bold'))
+
+exp_m3_plot <- Heatmap(exp_m3,
+                         name = 'z-score',
+                         col = col_fun,
+                         cluster_rows = TRUE,
+                         cluster_row_slices = TRUE,
+                         show_row_dend = TRUE,
+                         row_title = 'Genes',
+                         row_title_side = 'left',
+                         row_title_gp = gpar(fontsize = 11, fontface = 'bold'),
+                         row_title_rot = 90,
+                         show_row_names = FALSE,
+                         row_names_gp = gpar(fontsize = 11, fontface = 'bold'),
+                         row_names_side = 'left',
+                         row_dend_width = unit(20, 'mm'),
+                         
+                         cluster_columns = FALSE,
+                         show_column_dend = FALSE,
+                         column_title = '84 genes from M3',
+                         column_title_side = 'top',
+                         column_title_gp = gpar(fontsize = 13, fontface = 'bold'),
+                         column_title_rot = 0,
+                         show_column_names = TRUE,
+                         show_heatmap_legend = TRUE,
+                         column_names_gp = gpar(fontsize = 8, fontface = 'bold'),
+                         column_names_rot = 45,##change the angle of column name
+                         
+                         clustering_distance_rows = 'euclidean',
+                         clustering_method_rows = 'ward.D2')#,
+
+exp_m3_plot
+```
+```{r}
+#M4
+exp_m4 <- exp[rownames(exp) %in% m4$genes,]
+exp_m4 <- as.matrix(exp_m4)
+exp_m4 <- exp_m4[,c(21,22,23,24,5,6,7,8,1,2,3,4,13,14,15,16,17,18,19,20,9,10,11,12)]
+
+col_fun  <- colorRamp2(c(-3, 0, 3), c("purple", "white", "firebrick"))
+
+df_colnames <- as.data.frame((colnames(exp_m4)))
+colnames(df_colnames)[1]<- "Comparissons"
+
+##prepare heatmap plot
+##add colnames
+haTerms_colnames <- HeatmapAnnotation(
+  df = df_colnames,
+  #col = col_fun,
+  Term = anno_text(
+    colnames(exp_m4),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold')),
+  annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+  annotation_name_side = 'left')
+##change legend sizes
+Term = anno_text(
+  colnames(exp_m4),
+  rot = 45,
+  just = 'right',
+  gp = gpar(fontsize = 13, fontface = 'bold'))
+
+exp_m4_plot <- Heatmap(exp_m4,
+                         name = 'z-score',
+                         col = col_fun,
+                         cluster_rows = TRUE,
+                         cluster_row_slices = TRUE,
+                         show_row_dend = TRUE,
+                         row_title = 'Genes',
+                         row_title_side = 'left',
+                         row_title_gp = gpar(fontsize = 11, fontface = 'bold'),
+                         row_title_rot = 90,
+                         show_row_names = FALSE,
+                         row_names_gp = gpar(fontsize = 11, fontface = 'bold'),
+                         row_names_side = 'left',
+                         row_dend_width = unit(20, 'mm'),
+                         
+                         cluster_columns = FALSE,
+                         show_column_dend = FALSE,
+                         column_title = '49 genes from M4',
+                         column_title_side = 'top',
+                         column_title_gp = gpar(fontsize = 13, fontface = 'bold'),
+                         column_title_rot = 0,
+                         show_column_names = TRUE,
+                         show_heatmap_legend = TRUE,
+                         column_names_gp = gpar(fontsize = 8, fontface = 'bold'),
+                         column_names_rot = 45,##change the angle of column name
+                         
+                         clustering_distance_rows = 'euclidean',
+                         clustering_method_rows = 'ward.D2')#,
+
+exp_m4_plot
+```
+
+```{r}
+#M5
+exp_m5 <- exp[rownames(exp) %in% m5$genes,]
+exp_m5 <- as.matrix(exp_m5)
+exp_m5 <- exp_m5[,c(21,22,23,24,5,6,7,8,1,2,3,4,13,14,15,16,17,18,19,20,9,10,11,12)]
+col_fun  <- colorRamp2(c(-3, 0, 3), c("purple", "white", "firebrick"))
+
+df_colnames <- as.data.frame((colnames(exp_m5)))
+colnames(df_colnames)[1]<- "Comparissons"
+
+##prepare heatmap plot
+##add colnames
+haTerms_colnames <- HeatmapAnnotation(
+  df = df_colnames,
+  #col = col_fun,
+  Term = anno_text(
+    colnames(exp_m5),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold')),
+  annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+  annotation_name_side = 'left')
+##change legend sizes
+Term = anno_text(
+  colnames(exp_m5),
+  rot = 45,
+  just = 'right',
+  gp = gpar(fontsize = 13, fontface = 'bold'))
+
+exp_m5_plot <- Heatmap(exp_m5,
+                         name = 'z-score',
+                         col = col_fun,
+                         cluster_rows = TRUE,
+                         cluster_row_slices = TRUE,
+                         show_row_dend = TRUE,
+                         row_title = 'Genes',
+                         row_title_side = 'left',
+                         row_title_gp = gpar(fontsize = 11, fontface = 'bold'),
+                         row_title_rot = 90,
+                         show_row_names = FALSE,
+                         row_names_gp = gpar(fontsize = 11, fontface = 'bold'),
+                         row_names_side = 'left',
+                         row_dend_width = unit(20, 'mm'),
+                         
+                         cluster_columns = FALSE,
+                         show_column_dend = FALSE,
+                         column_title = '48 genes from M5',
+                         column_title_side = 'top',
+                         column_title_gp = gpar(fontsize = 13, fontface = 'bold'),
+                         column_title_rot = 0,
+                         show_column_names = TRUE,
+                         show_heatmap_legend = TRUE,
+                         column_names_gp = gpar(fontsize = 8, fontface = 'bold'),
+                         column_names_rot = 45,##change the angle of column name
+                         
+                         clustering_distance_rows = 'euclidean',
+                         clustering_method_rows = 'ward.D2')#,
+
+exp_m5_plot
+```
+```{r}
+#M6
+exp_m6 <- exp[rownames(exp) %in% m6$genes,]
+exp_m6 <- as.matrix(exp_m6)
+exp_m6 <- exp_m6[,c(21,22,23,24,5,6,7,8,1,2,3,4,13,14,15,16,17,18,19,20,9,10,11,12)]
+
+col_fun  <- colorRamp2(c(-3, 0, 3), c("purple", "white", "firebrick"))
+
+df_colnames <- as.data.frame((colnames(exp_m6)))
+colnames(df_colnames)[1]<- "Comparissons"
+
+##prepare heatmap plot
+##add colnames
+haTerms_colnames <- HeatmapAnnotation(
+  df = df_colnames,
+  #col = col_fun,
+  Term = anno_text(
+    colnames(exp_m6),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold')),
+  annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+  annotation_name_side = 'left')
+##change legend sizes
+Term = anno_text(
+  colnames(exp_m6),
+  rot = 45,
+  just = 'right',
+  gp = gpar(fontsize = 13, fontface = 'bold'))
+
+exp_m6_plot <- Heatmap(exp_m6,
+                         name = 'z-score',
+                         col = col_fun,
+                         cluster_rows = TRUE,
+                         cluster_row_slices = TRUE,
+                         show_row_dend = TRUE,
+                         row_title = 'Genes',
+                         row_title_side = 'left',
+                         row_title_gp = gpar(fontsize = 11, fontface = 'bold'),
+                         row_title_rot = 90,
+                         show_row_names = FALSE,
+                         row_names_gp = gpar(fontsize = 11, fontface = 'bold'),
+                         row_names_side = 'left',
+                         row_dend_width = unit(20, 'mm'),
+                         
+                         cluster_columns = FALSE,
+                         show_column_dend = FALSE,
+                         column_title = '37 genes from M6',
+                         column_title_side = 'top',
+                         column_title_gp = gpar(fontsize = 13, fontface = 'bold'),
+                         column_title_rot = 0,
+                         show_column_names = TRUE,
+                         show_heatmap_legend = TRUE,
+                         column_names_gp = gpar(fontsize = 8, fontface = 'bold'),
+                         column_names_rot = 45,##change the angle of column name
+                         
+                         clustering_distance_rows = 'euclidean',
+                         clustering_method_rows = 'ward.D2')#,
+
+exp_m6_plot
+```
+
+
+The sample annotation of your CEMiTool object can be retrieved and reassigned using the sample_annotation(cem) function. This function can also be used to define the columns with sample names and sample groupings (which are “SampleName” and “Class”, by default):
+```{r}
+sample_annotation(cem, 
+                  sample_name_column="SampleName", 
+                  class_column="Class") <- sample_annot
+```
+
+# Module enrichment
+```{r, fig.height=6, fig.width=14}
+# generate heatmap of gene set enrichment analysis
+cem <- mod_gsea(cem)
+cem <- plot_gsea(cem)
+show_plot(cem, "gsea")
+```
+
+# Expression patterns in modules
+```{r}
+# plot gene expression within each module
+cem <- plot_profile(cem)
+plots <- show_plot(cem, "profile")
+plots[1]
+plots[2]
+plots[3]
+plots[4]
+plots[5]
+plots[6]
+```
+```{r}
+gmt_fname <- system.file("extdata", "pathways.gmt", package = "CEMiTool")
+gmt_in <- read_gmt(gmt_fname)
+```
+
+```{r}
+cem <- mod_ora(cem, gmt_in)
+
+# plot ora results
+cem <- plot_ora(cem)
+plots <- show_plot(cem, "ora")
+plots[1]
+plots[2]
+plots[3]
+plots[4]
+plots[5]
+plots[6]
+```
+```{r}
+# read interactions
+int_fname <- system.file("extdata", "interactions.tsv", package = "CEMiTool")
+int_df <- read.delim(int_fname)
+head(int_df)
+```
+
+```{r fig.height=15, fig.width=15}
+# plot interactions
+library(ggplot2)
+interactions_data(cem) <- int_df # add interactions
+cem <- plot_interactions(cem) # generate plot
+plots <- show_plot(cem, "interaction") # view the plot for the first module
+plots[1]
+plots[2]
+plots[3]
+plots[4]
+plots[5]
+plots[6]
+```
+
+```{r}
+# run cemitool
+# library(ggplot2)
+# cemitool(
+#                 Exp,
+#                 sample_annot,
+#                 filter = TRUE,
+#                 filter_pval = 0.05,
+#                 apply_vst = FALSE,
+#                 eps = 0.1,
+#                 cor_method = c("pearson", "spearman"),
+#                 cor_function = "cor",
+#                 network_type = "unsigned",
+#                 tom_type = "signed",
+#                 set_beta = 14,
+#                 force_beta = FALSE,
+#                 sample_name_column = "SampleName",
+#                 class_column = "Class",
+#                 merge_similar = TRUE,
+#                 rank_method = "mean",
+#                 ora_pval = 0.05,
+#                 gsea_scale = TRUE,
+#                 gsea_min_size = 15,
+#                 gsea_max_size = 1000,
+#                 min_ngen = 30,
+#                 diss_thresh = 0.8,
+#                 plot = TRUE,
+#                 plot_diagnostics = TRUE,
+#                 order_by_class = TRUE,
+#                 center_func = "mean",
+#                 directed = FALSE,
+#                 verbose = FALSE
+# )
+# create report as html document
+generate_report(cem, directory="tables/cemitools/Reports", force=TRUE)
+
+# write analysis results into files
+write_files(cem, directory="tables/cemitools/Tables", force=TRUE)
+ 
+# save all plots
+save_plots(cem, "all", directory="tables/cemitools/Plots", force=TRUE)
+```
+
+
+
+```{r}
+# 
+#   write.table(x = PCA_norm.filt, 
+#               file = "tables/cemitools/expression.tsv", 
+#               row.names = T, 
+#               col.names = T, 
+#               quote = F, 
+#               sep = '\t')
+# 
+#   write.table(x = sample_annot, 
+#               file = "tables/cemitools/sample_annot.tsv", 
+#               row.names = F, 
+#               col.names = T, 
+#               quote = F, 
+#               sep = '\t')
+
+```
+
+

@@ -1,0 +1,2811 @@
+---
+title: "1.2 - PC analysis"
+author: "Ricardo Rosa Junior"
+date: '2022-05-09'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message=FALSE, warning=FALSE}
+library(oligo)
+library(affy)
+library(tidyr)
+library(arrayQualityMetrics)
+library(ggplot2)
+library(Biobase)
+library(pheatmap)
+library(clariomdhumantranscriptcluster.db)
+library(dplyr)
+library(viridis)
+library(limma)
+library(cartography)
+library(paletteer)
+library(rcartocolor)
+library(sva)
+library(tidyverse)
+library(BatchQC)
+library(rhdf5)
+library(tools)
+library(dendextend)
+library(preprocessCore)
+library(vioplot)
+library(ggrepel)
+library(ggfortify)
+library(factoextra)
+library(circlize)
+library(tibble)
+library(ComplexHeatmap)
+library(enrichplot)
+library(clusterProfiler)
+library(fgsea)
+library(simplifyEnrichment)
+library(rrvgo)
+library(PPInfer)
+```
+
+# Multi-dimsensions PCA analysis
+```{r}
+#get probes symbols
+PCA_norm.filt = as.data.frame(read_csv('array.norm.filtered.nomapping.csv'))
+rownames(PCA_norm.filt) = PCA_norm.filt$Genes
+PCA_norm.filt$Genes = NULL
+annotation_clariom = read_csv('annotation_clariom.csv')
+PCA_norm.filt <-   as.data.frame(PCA_norm.filt)%>%
+  as.data.frame()%>%
+  rownames_to_column(var="ID")
+
+PCA_norm.filt=inner_join(PCA_norm.filt, annotation_clariom, by= c("ID"= "PROBEID"))
+PCA_norm.filt=PCA_norm.filt[!duplicated(PCA_norm.filt$SYMBOL),]%>%
+  remove_rownames %>% 
+  column_to_rownames("SYMBOL")
+PCA_norm.filt<-PCA_norm.filt[,-c(1,22)]
+#data fit
+PCA_expMat <- prcomp(t(PCA_norm.filt), scale. = T, center=T)
+```
+
+```{r echo=FALSE}
+#Screeplot
+factoextra::fviz_screeplot(PCA_expMat,addlabels=TRUE,
+                           barfill="#837E7C", barcolor ="#837E7C",
+                           linecolor ="red") +
+  theme(text = element_text(family = "serif",size = 10.5)) +
+  ggtitle(label = "Scree plot - Expressions values")
+```
+
+```{r, warning=FALSE, message=FALSE}
+#PCA
+#add conditions info
+pheno = as.data.frame(read_csv('pheno.csv'))
+
+PCA_norm.filt <- as.data.frame (PCA_norm.filt)
+PCA_norm.filt <- as.matrix (PCA_norm.filt)
+
+PCA_expMat <- prcomp(t(PCA_norm.filt), scale. = T, center=T) 
+
+hab <- tibble(vars = colnames(PCA_norm.filt)) %>% 
+  mutate(Cond = pheno$Conditions)
+
+for (i in 1:10) {
+  for (j in 1:10) {
+    temp_plot = fviz_pca_ind(PCA_expMat,
+             axes = c(i, j),
+             label = "none", # hide individual labels
+             habillage = hab$Cond, # color by groups
+             #palette = c("#842DCE","#2B65EC","#C11B17"),
+             addEllipses = FALSE # Concentration ellipses
+             #ellipse.level=0.6
+            )+
+    geom_segment(aes(x=0, xend = 130 , y=-120, yend = -120), size=1,
+            arrow = arrow(length = unit(0.3,"cm")), colour = 'red')+
+    geom_segment(aes(x=0, xend = -130 , y=-120, yend = -120), size=1,
+            arrow = arrow(length = unit(0.3,"cm")), colour = 'blue')+
+    geom_segment(aes(x=-150, xend = -150 , y=0, yend = 100), size=1,
+            arrow = arrow(length = unit(0.3,"cm")), colour = 'red')+
+    geom_segment(aes(x=-150, xend = -150 , y=0, yend = -100), size=1,
+            arrow = arrow(length = unit(0.3,"cm")), colour = 'blue')+   
+    theme(text = element_text(family = "serif",size = 10), plot.background = element_rect(colour = 'white')) +
+      ggtitle(label = paste0("Dim",i," + Dim",j))+
+      scale_y_continuous(limits = c(-120, 120, 50))+
+      scale_x_continuous(limits = c(-150, 150, 50))
+    
+    ggsave(temp_plot, file = paste0("images/pcas/pca_dim_",i,"_",j,".jpg"), width = 8, height = 5)
+      }  
+}
+```
+
+#Dim contribution
+```{r fig.height=10, fig.width=20}
+#Dim1
+fviz_contrib(PCA_expMat, choice = "var",
+             axes = 1, top = 150,
+            barfill="#837E7C", barcolor ="#837E7C")+
+theme(text = element_text(family = "serif",size = 10)) +
+  ggtitle(label = "Contribution of variables to Dim1")
+#Dim2
+fviz_contrib(PCA_expMat, choice = "var",
+             axes = 2, top = 50,
+             barfill="#837E7C", barcolor ="#837E7C")+
+theme(text = element_text(family = "serif",size = 10)) +
+  ggtitle(label = "Contribution of variables to Dim2")
+
+#Dim3
+fviz_contrib(PCA_expMat, choice = "var",
+             axes = 3, top = 50,
+             barfill="#837E7C", barcolor ="#837E7C")+
+theme(text = element_text(family = "serif",size = 10)) +
+  ggtitle(label = "Contribution of variables to Dim3")
+
+```
+
+```{r}
+matriz.PCA.GSEA<-PCA_expMat[["rotation"]]
+
+PCs<-matriz.PCA.GSEA %>% 
+  as.data.frame() %>% 
+   dplyr::select(PC1, PC2) %>% 
+  rownames_to_column(var= "SYMBOL")
+
+#prepare list
+#Prepare the list with id and FC
+#1st get genes id
+entrz_name<- AnnotationDbi::select(org.Hs.eg.db,
+                                             key=PCs$SYMBOL,  
+                                             columns="ENTREZID",
+                                             keytype="SYMBOL")
+#inner join to retrieve logFC data
+PC_entrz <- inner_join(PCs, entrz_name, by="SYMBOL")
+
+#remove possible duplicated symbols and NAs
+PC_entrz<-PC_entrz[!is.na(PC_entrz$ENTREZID),]
+PC_entrz<-PC_entrz[!duplicated(PC_entrz$ENTREZID),]
+
+#atribuir a outro nome para não sobrescrever
+nw_t_PC<-PC_entrz
+#separate only PC1 value
+PC1_entrz =nw_t_PC$PC1
+#create vectors and put in decreasing order according to FC
+names(PC1_entrz)<-as.vector(nw_t_PC$ENTREZID)
+PC1_gene_list = sort(PC1_entrz, decreasing = TRUE)
+#select genes by order of contribution
+number_of_genes_1 <- c(length(PC1_gene_list)) #modify when wanting different number of genes (cutoff dim 1 = 4708)
+var_1 <- get_pca_var(PCA_expMat)
+contrib_1 = var_1$contrib %>% as.data.frame()
+ordered_contrib_1 = contrib_1[order(contrib_1$Dim.1, decreasing=TRUE),] %>% rownames_to_column(var = 'SYMBOL')
+ordered_contrib_1 <- ordered_contrib_1$SYMBOL[1:number_of_genes_1]
+ordered_contrib_1 <- nw_t_PC[match(ordered_contrib_1, nw_t_PC$SYMBOL),]$ENTREZID
+
+PC1_gene_list <- PC1_gene_list[names(PC1_gene_list) %in% ordered_contrib_1]
+
+#separate only PC2 value
+PC2_entrz =nw_t_PC$PC2
+#create vectors and put in decreasing order according to FC
+names(PC2_entrz)<-as.vector(nw_t_PC$ENTREZID)
+PC2_gene_list = sort(PC2_entrz, decreasing = TRUE)
+
+#select genes by order of contribution
+number_of_genes_2 <- c(length(PC2_gene_list)) #modify when wanting different number of genes (cutoff dim 2 = 4150)
+var_2 <- get_pca_var(PCA_expMat)
+contrib_2 = var_2$contrib %>% as.data.frame()
+ordered_contrib_2 = contrib_2[order(contrib_2$Dim.2, decreasing=TRUE),] %>% rownames_to_column(var = 'SYMBOL')
+ordered_contrib_2 <- ordered_contrib_2$SYMBOL[1:number_of_genes_2]
+ordered_contrib_2 <- nw_t_PC[match(ordered_contrib_2, nw_t_PC$SYMBOL),]$ENTREZID
+
+PC2_gene_list <- PC2_gene_list[names(PC2_gene_list) %in% ordered_contrib_2]
+
+# #separate only PC3 value
+# PC3_entrz =nw_t_PC$PC3
+# #create vectors and put in decreasing order according to FC
+# names(PC3_entrz)<-as.vector(nw_t_PC$ENTREZID)
+# PC3_gene_list = sort(PC3_entrz, decreasing = TRUE)
+# 
+# #select genes by order of contribution
+# number_of_genes_3 <- c(3828)
+# var_3 <- get_pca_var(PCA_expMat)
+# contrib_3 = var_3$contrib %>% as.data.frame()
+# ordered_contrib_3 = contrib_3[order(contrib_3$Dim.3, decreasing=TRUE),] %>% rownames_to_column(var = 'SYMBOL')
+# ordered_contrib_3 <- ordered_contrib_3$SYMBOL[1:number_of_genes_3]
+# ordered_contrib_3 <- nw_t_PC[match(ordered_contrib_3, nw_t_PC$SYMBOL),]$ENTREZID
+# 
+# PC3_gene_list <- PC3_gene_list[names(PC3_gene_list) %in% ordered_contrib_3]
+```
+
+## PC1 - Enrichment with genes with high contribution
+
+```{r}
+#Different cuts for genes by contribution
+
+#GO
+PC1_gseGO <- gseGO(geneList = PC1_gene_list,
+                   ont = "BP",
+                   OrgDb = org.Hs.eg.db,
+                   minGSSize    = 100,
+                   maxGSSize    = 500,
+                   pvalueCutoff = 0.05,
+                   pAdjustMethod = "BH",
+                   keyType       = "ENTREZID")
+
+dotplot(PC1_gseGO, showCategory = 10, title = "LSS vs all" , split=".sign") + 
+  facet_grid(.~.sign)
+
+
+GSEA.barplot(PC1_gseGO, category = 'Description', score = 'NES',
+             pvalue = 'p.adjust', sort = 'NES', decreasing = TRUE, top=20)
+
+GSEA.barplot(PC1_gseGO, category = 'Description', score = 'NES',
+             pvalue = 'p.adjust', sort = 'NES', decreasing = FALSE, top=20)
+
+PC1_NESpos<-PC1_gseGO %>%
+  filter((NES)>= 0)
+PC1_NESpos_ts<-pairwise_termsim(PC1_NESpos)
+simMatrix_pc1pos <- calculateSimMatrix(PC1_NESpos_ts$ID,
+                                orgdb="org.Hs.eg.db",
+                                ont="BP")
+
+scores <- setNames(-log10(PC1_NESpos_ts$qvalues), PC1_NESpos_ts$ID)
+reducedTerms_pc1pos <- reduceSimMatrix(simMatrix_pc1pos,
+                                scores,
+                                threshold=0.7,
+                                orgdb="org.Hs.eg.db")
+reducedTerms_pc1pos <-subset(reducedTerms_pc1pos, reducedTerms_pc1pos$cluster<=10)
+treemapPlot(reducedTerms_pc1pos)
+  
+PC1_NESneg<-PC1_gseGO %>%
+  filter((NES)<= 0)
+PC1_NESneg_ts<-pairwise_termsim(PC1_NESneg)
+simMatrix_pc1neg <- calculateSimMatrix(PC1_NESneg_ts$ID,
+                                orgdb="org.Hs.eg.db",
+                                ont="BP")
+
+scores <- setNames(-log10(PC1_NESneg_ts$qvalues), PC1_NESneg_ts$ID)
+reducedTerms_pc1neg <- reduceSimMatrix(simMatrix_pc1neg,
+                                scores,
+                                threshold=0.7,
+                                orgdb="org.Hs.eg.db")
+reducedTerms_pc1neg <-subset(reducedTerms_pc1neg, reducedTerms_pc1neg$cluster<=10)
+treemapPlot(reducedTerms_pc1neg)
+
+
+
+```
+
+## PC2 - Enrichment with genes with high contribution
+
+```{r}
+PC2_gseGO <- gseGO(geneList = PC2_gene_list,
+                     ont = "BP",
+                    OrgDb = org.Hs.eg.db,
+                     minGSSize    = 100,
+                     maxGSSize    = 500,
+                     pvalueCutoff = 0.05,
+                     pAdjustMethod = "BH", 
+                     keyType       = "ENTREZID")
+
+
+dotplot(PC2_gseGO, showCategory = 10, title = "OSS vs LSS" , split=".sign") + 
+  facet_grid(.~.sign)
+
+GSEA.barplot(PC2_gseGO, category = 'Description', score = 'NES',
+             pvalue = 'p.adjust', sort = 'NES', decreasing = TRUE, top=20)
+
+GSEA.barplot(PC2_gseGO, category = 'Description', score = 'NES',
+             pvalue = 'p.adjust', sort = 'NES', decreasing = FALSE, top=20)
+
+PC2_NESpos<-PC2_gseGO %>%
+  filter((NES)>= 0)
+PC2_NESpos_ts<-pairwise_termsim(PC2_NESpos)
+simMatrix_PC2pos <- calculateSimMatrix(PC2_NESpos_ts$ID,
+                                orgdb="org.Hs.eg.db",
+                                ont="BP")
+
+scores <- setNames(-log10(PC2_NESpos_ts$qvalues), PC2_NESpos_ts$ID)
+reducedTerms_PC2pos <- reduceSimMatrix(simMatrix_PC2pos,
+                                scores,
+                                threshold=0.7,
+                                orgdb="org.Hs.eg.db")
+reducedTerms_PC2pos <-subset(reducedTerms_PC2pos, reducedTerms_PC2pos$cluster<=10)
+treemapPlot(reducedTerms_PC2pos)
+
+PC2_NESneg<-PC2_gseGO %>%
+  filter((NES)<= 0) 
+PC2_NESneg_ts<-pairwise_termsim(PC2_NESneg)
+simMatrix_PC2neg <- calculateSimMatrix(PC2_NESneg_ts$ID,
+                                orgdb="org.Hs.eg.db",
+                                ont="BP")
+
+scores <- setNames(-log10(PC2_NESneg_ts$qvalues), PC2_NESneg_ts$ID)
+reducedTerms_PC2neg <- reduceSimMatrix(simMatrix_PC2neg,
+                                scores,
+                                threshold=0.7,
+                                orgdb="org.Hs.eg.db")
+reducedTerms_PC2neg <-subset(reducedTerms_PC2neg, reducedTerms_PC2neg$cluster<=10)
+treemapPlot(reducedTerms_PC2neg)
+
+
+```
+
+<!-- ## PC3 - Enrichment with genes with high contribution -->
+
+<!-- ```{r} -->
+<!-- PC3_gseGO <- gseGO(geneList = PC3_gene_list, -->
+<!--                      ont = "BP", -->
+<!--                     OrgDb = org.Hs.eg.db, -->
+<!--                      minGSSize    = 100, -->
+<!--                      maxGSSize    = 500, -->
+<!--                      pvalueCutoff = 0.05, -->
+<!--                      pAdjustMethod = "BH",  -->
+<!--                      keyType       = "ENTREZID") -->
+
+
+<!-- dotplot(PC3_gseGO, showCategory = 10, title = "LSS vs OSS" , split=".sign") +  -->
+<!--   facet_grid(.~.sign) -->
+
+<!-- GSEA.barplot(PC3_gseGO, category = 'Description', score = 'NES', -->
+<!--              pvalue = 'p.adjust', sort = 'NES', decreasing = TRUE, top=20) -->
+
+<!-- GSEA.barplot(PC3_gseGO, category = 'Description', score = 'NES', -->
+<!--              pvalue = 'p.adjust', sort = 'NES', decreasing = FALSE, top=20) -->
+
+<!-- PC3_NESpos<-PC3_gseGO %>% -->
+<!--   filter((NES)>= 0) -->
+<!-- PC3_NESpos_ts<-pairwise_termsim(PC3_NESpos) -->
+<!-- simMatrix_PC3pos <- calculateSimMatrix(PC3_NESpos_ts$ID, -->
+<!--                                 orgdb="org.Hs.eg.db", -->
+<!--                                 ont="BP") -->
+
+<!-- scores <- setNames(-log10(PC3_NESpos_ts$qvalues), PC3_NESpos_ts$ID) -->
+<!-- reducedTerms_PC3pos <- reduceSimMatrix(simMatrix_PC3pos, -->
+<!--                                 scores, -->
+<!--                                 threshold=0.7, -->
+<!--                                 orgdb="org.Hs.eg.db") -->
+<!-- reducedTerms_PC3pos <-subset(reducedTerms_PC3pos, reducedTerms_PC3pos$cluster<=10) -->
+<!-- treemapPlot(reducedTerms_PC3pos) -->
+
+<!-- PC3_NESneg<-PC3_gseGO %>% -->
+<!--   filter((NES)<= 0) -->
+<!-- PC3_NESneg_ts<-pairwise_termsim(PC3_NESneg) -->
+<!-- simMatrix_PC3neg <- calculateSimMatrix(PC3_NESneg_ts$ID, -->
+<!--                                 orgdb="org.Hs.eg.db", -->
+<!--                                 ont="BP") -->
+
+<!-- scores <- setNames(-log10(PC3_NESneg_ts$qvalues), PC3_NESneg_ts$ID) -->
+<!-- reducedTerms_PC3neg <- reduceSimMatrix(simMatrix_PC3neg, -->
+<!--                                 scores, -->
+<!--                                 threshold=0.7, -->
+<!--                                 orgdb="org.Hs.eg.db") -->
+<!-- reducedTerms_PC3neg <-subset(reducedTerms_PC3neg, reducedTerms_PC3neg$cluster<=10) -->
+<!-- treemapPlot(reducedTerms_PC3neg) -->
+
+<!-- ``` -->
+
+
+get lists of genes.pos
+```{r}
+PC1_NESposdf <- as.data.frame(PC1_NESpos)
+
+PC1_NESposdf <- PC1_NESposdf %>%
+  dplyr::select(Description, core_enrichment)
+genes.PC1posID<- str_split(PC1_NESposdf$core_enrichment, "/", simplify = T) %>%
+  t()
+colnames(genes.PC1posID) <- PC1_NESposdf$Description
+
+#Define the clusters using the trplot info
+
+inflammatory_response <- c('inflammatory response', 'leukicyte migration', 'leukocyte activation',
+                           'response to cytokine', 'taxis', 'defense response')
+
+
+#Create object with cluster information
+genes.PC1posID.longer <- genes.PC1posID %>%
+  as.data.frame() %>%
+  tidyr::pivot_longer(everything(), names_to = "Description", values_to= "Genes") %>%
+  filter(Genes != "") %>%
+    mutate(Cluster= case_when(Description %in% inflammatory_response ~ "inflammatory_response"
+                          #   Description %in% blood_vessel_morphogenesis ~ "blood_vessel_morphogenesis",
+                          #   Description %in% response_to_lipid ~ "response_to_lipid",
+                          #   Description %in% regulation_of_cell_adhesion ~ "regulation_of_cell_adhesion",
+                          #   Description %in% ameboidal_cell_migration ~ "ameboidal_cell_migration",
+                          #   Description %in% cell_motility ~ "cell_motility",
+                              )) %>%
+  tidyr::drop_na()
+
+#get gene symbols
+genes.PC1posID.longer$SYMBOL <-
+  entrz_name$SYMBOL[match(genes.PC1posID.longer$Genes,
+                                entrz_name$ENTREZID)]
+
+#Visualize expression of genes in cluster 1 (INFLAMMATION)
+INFLAMMATION.genes<- genes.PC1posID.longer %>%
+  filter(Cluster == "inflammatory_response") %>%
+  as.data.frame() %>%
+  dplyr::select(SYMBOL) %>%
+  distinct()
+```
+
+Heatmaps
+```{r fig.height=32, fig.width=12}
+### fazer z-score
+scale_rows <- function (x) {
+  m = apply(x, 1, mean, na.rm = T)
+  s = apply(x, 1, sd, na.rm = T)
+  return((x - m)/s)
+}
+
+PCA_norm.filt_zs<-scale_rows(PCA_norm.filt)
+PCA_norm.filt_zs <- as.data.frame(PCA_norm.filt_zs)
+colnames(PCA_norm.filt_zs) <- pheno$Samples_name
+
+# Subsetting
+INFLAMMATION.genes_matrix<-PCA_norm.filt_zs %>%
+rownames_to_column(var="SYMBOL")%>%
+  arrange((SYMBOL))%>%
+  semi_join( INFLAMMATION.genes, by= c("SYMBOL"= "SYMBOL"))%>%
+  column_to_rownames(var="SYMBOL")%>%
+  mutate(across(ends_with("CEL"),as.numeric)) %>%
+  as.matrix()
+#INFLAMMATION.genes_matrix<-scale_rows(INFLAMMATION.genes_matrix)
+###aplicar análise para definirkmeans do plot
+fviz_nbclust(INFLAMMATION.genes_matrix, kmeans, method = "wss")+
+  geom_vline(xintercept = 2, linetype = 2)
+
+##heatmap
+col_fun  <- colorRamp2(c(-2, 0, 2), c("darkblue", "white", "indianred"))
+df_colnames <- as.data.frame((colnames(INFLAMMATION.genes_matrix)))
+
+col_plasm<-colorRamp2(c(-2, 0, 2), plasma(3))
+
+haTerms_colnames <- HeatmapAnnotation(
+  df = df_colnames,
+  #col = col_fun,
+  Term = anno_text(
+    colnames(INFLAMMATION.genes_matrix),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold')),
+  annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+  annotation_name_side = 'left')
+
+Term = anno_text(
+  colnames(INFLAMMATION.genes_matrix),
+  rot = 45,
+  just = 'right',
+  gp = gpar(fontsize = 13, fontface = 'bold'))
+
+Heatmap(INFLAMMATION.genes_matrix,
+                                      name = 'z-score',
+                                      rect_gp = gpar(col = 'whitesmoke'),
+                                      col = col_plasm,
+                                      cluster_rows = TRUE,
+                                      cluster_row_slices = FALSE,
+                                      show_row_dend = TRUE,
+                                      row_title = 'Gene Symbol',
+                                      row_title_side = 'left',
+                                      row_title_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_title_rot = 90,
+                                      show_row_names = TRUE,
+                                      #right_annotation = ha,
+                                      row_names_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_names_side = 'right',
+                                      row_dend_width = unit(35, 'mm'),
+
+                                      cluster_columns = TRUE,
+                                      show_column_dend = TRUE,
+                                      column_title = 'Inflammation',
+                                      column_title_side = 'top',
+                                      column_title_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_title_rot = 0,
+                                      show_column_names = TRUE,
+                                      show_heatmap_legend = TRUE,
+                                      column_names_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_names_rot = 45,
+                                      row_km= 2,
+                                      clustering_distance_columns = 'euclidean',
+                                      clustering_method_columns = 'ward.D2')
+
+```
+
+get lists of genes neg
+```{r}
+PC1_NESnegdf <- as.data.frame(PC1_NESneg)
+
+PC1_NESnegdf <- PC1_NESnegdf %>%
+  dplyr::select(Description, core_enrichment)
+genes.PC1negID<- str_split(PC1_NESnegdf$core_enrichment, "/", simplify = T) %>%
+  t()
+colnames(genes.PC1negID) <- PC1_NESnegdf$Description
+
+#Define the clusters using the trplot info
+
+oxidative_phosphorilation <- c("aerobic respiration", "oxidative phosphorylation",
+"electron transport chain", "cellular respiration",
+"energy derivation by oxidation of organic compounds",
+"generation of precursor metabolites and energy")
+
+ncRNA <- c("rRNA processing","ncRNA processing","rRNA metabolic process",
+"ncRNA metabolic process","tRNA metabolic process","tRNA processing")
+
+mRNA_porcessing <- c("mRNA processing","RNA splicing",
+                     "via transesterification reactions", "RNA splicing",
+                     "via transesterification reactions with bulged adenosine as nucleophile",
+                     "mRNA splicing", "via spliceosome","RNA splicing")
+
+mitotic_nuclear_divison <- c("mitotic nuclear division","nuclear division",
+                             "organelle fission")
+
+mitotic_chromatid_segregation <- c("mitotic sister chromatid segregation",
+"sister chromatid segregation","nuclear chromosome segregation",
+"chromosome segregation")
+
+
+#Create object with cluster information
+genes.PC1negID.longer <- genes.PC1negID %>%
+  as.data.frame() %>%
+  tidyr::pivot_longer(everything(), names_to = "Description", values_to= "Genes") %>%
+  filter(Genes != "") %>%
+    mutate(Cluster= case_when(Description %in% oxidative_phosphorilation ~ "oxidative_phosphorilation",
+                              Description %in% ncRNA ~ "ncRNA",
+                              Description %in% mRNA_porcessing ~ "mRNA_porcessing",
+                              Description %in% mitotic_nuclear_divison ~ "mitotic_nuclear_divison",
+                              Description %in% mitotic_chromatid_segregation ~ "mitotic_chromatid_segregation")) %>%
+  tidyr::drop_na()
+
+#get gene symbols
+genes.PC1negID.longer$SYMBOL <-
+  entrz_name$SYMBOL[match(genes.PC1negID.longer$Genes,
+                                entrz_name$ENTREZID)]
+
+#Visualize expression of genes in cluster 1 (OXPHOSPH)
+OXPHOSPH.genes<- genes.PC1negID.longer %>%
+  filter(Cluster == "oxidative_phosphorilation") %>%
+  as.data.frame() %>%
+  dplyr::select(SYMBOL) %>%
+  distinct()
+
+#Visualize expression of genes in cluster 1 (NCRNA)
+NCRNA.genes<- genes.PC1negID.longer %>%
+  filter(Cluster == "ncRNA") %>%
+  as.data.frame() %>%
+  dplyr::select(SYMBOL) %>%
+  distinct()
+
+#Visualize expression of genes in cluster 1 (MRNA)
+MRNA.genes<- genes.PC1negID.longer %>%
+  filter(Cluster == "mRNA_porcessing") %>%
+  as.data.frame() %>%
+  dplyr::select(SYMBOL) %>%
+  distinct()
+
+#Visualize expression of genes in cluster 1 (NUCLEARDIV)
+NUCLEARDIV.genes<- genes.PC1negID.longer %>%
+  filter(Cluster == "mitotic_nuclear_divison") %>%
+  as.data.frame() %>%
+  dplyr::select(SYMBOL) %>%
+  distinct()
+
+#Visualize expression of genes in cluster 1 (MITSEGREGATION)
+MITSEGREGATION.genes<- genes.PC1negID.longer %>%
+  filter(Cluster == "mitotic_chromatid_segregation") %>%
+  as.data.frame() %>%
+  dplyr::select(SYMBOL) %>%
+  distinct()
+```
+
+```{r fig.height=32, fig.width=12}
+# Subsetting
+OXPHOSPH.genes_matrix<-PCA_norm.filt_zs %>%
+rownames_to_column(var="SYMBOL")%>%
+  arrange((SYMBOL))%>%
+  semi_join(OXPHOSPH.genes, by= c("SYMBOL"= "SYMBOL"))%>%
+  column_to_rownames(var="SYMBOL")%>%
+  mutate(across(ends_with("CEL"),as.numeric)) %>%
+  as.matrix()
+#OXPHOSPH.genes_matrix<-scale_rows(OXPHOSPH.genes_matrix)
+###aplicar análise para definirkmeans do plot
+fviz_nbclust(OXPHOSPH.genes_matrix, kmeans, method = "wss")+
+  geom_vline(xintercept = 2, linetype = 2)
+
+##heatmap
+col_fun  <- colorRamp2(c(-2, 0, 2), c("darkblue", "white", "indianred"))
+df_colnames <- as.data.frame((colnames(OXPHOSPH.genes_matrix)))
+
+col_plasm<-colorRamp2(c(-2, 0, 2), plasma(3))
+
+haTerms_colnames <- HeatmapAnnotation(
+  df = df_colnames,
+  #col = col_fun,
+  Term = anno_text(
+    colnames(OXPHOSPH.genes_matrix),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold')),
+  annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+  annotation_name_side = 'left')
+
+Term = anno_text(
+  colnames(OXPHOSPH.genes_matrix),
+  rot = 45,
+  just = 'right',
+  gp = gpar(fontsize = 13, fontface = 'bold'))
+
+Heatmap(OXPHOSPH.genes_matrix,
+                                      name = 'z-score',
+                                      rect_gp = gpar(col = 'whitesmoke'),
+                                      col = col_plasm,
+                                      cluster_rows = TRUE,
+                                      cluster_row_slices = FALSE,
+                                      show_row_dend = TRUE,
+                                      row_title = 'Gene Symbol',
+                                      row_title_side = 'left',
+                                      row_title_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_title_rot = 90,
+                                      show_row_names = TRUE,
+                                      #right_annotation = ha,
+                                      row_names_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_names_side = 'right',
+                                      row_dend_width = unit(35, 'mm'),
+
+                                      cluster_columns = TRUE,
+                                      show_column_dend = TRUE,
+                                      column_title = 'Oxidative Phosphorilation',
+                                      column_title_side = 'top',
+                                      column_title_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_title_rot = 0,
+                                      show_column_names = TRUE,
+                                      show_heatmap_legend = TRUE,
+                                      column_names_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_names_rot = 45,
+                                      row_km=0,
+                                      clustering_distance_columns = 'euclidean',
+                                      clustering_method_columns = 'ward.D2')
+
+```
+```{r fig.height=32, fig.width=12}
+# Subsetting
+NCRNA.genes_matrix<-PCA_norm.filt_zs %>%
+rownames_to_column(var="SYMBOL")%>%
+  arrange((SYMBOL))%>%
+  semi_join(NCRNA.genes, by= c("SYMBOL"= "SYMBOL"))%>%
+  column_to_rownames(var="SYMBOL")%>%
+  mutate(across(ends_with("CEL"),as.numeric)) %>%
+  as.matrix()
+#NCRNA.genes_matrix<-scale_rows(NCRNA.genes_matrix)
+###aplicar análise para definirkmeans do plot
+fviz_nbclust(NCRNA.genes_matrix, kmeans, method = "wss")+
+  geom_vline(xintercept = 2, linetype = 2)
+
+##heatmap
+col_fun  <- colorRamp2(c(-2, 0, 2), c("darkblue", "white", "indianred"))
+df_colnames <- as.data.frame((colnames(NCRNA.genes_matrix)))
+
+col_plasm<-colorRamp2(c(-2, 0, 2), plasma(3))
+
+haTerms_colnames <- HeatmapAnnotation(
+  df = df_colnames,
+  #col = col_fun,
+  Term = anno_text(
+    colnames(NCRNA.genes_matrix),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold')),
+  annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+  annotation_name_side = 'left')
+
+Term = anno_text(
+  colnames(NCRNA.genes_matrix),
+  rot = 45,
+  just = 'right',
+  gp = gpar(fontsize = 13, fontface = 'bold'))
+
+Heatmap(NCRNA.genes_matrix,
+                                      name = 'z-score',
+                                      rect_gp = gpar(col = 'whitesmoke'),
+                                      col = col_plasm,
+                                      cluster_rows = TRUE,
+                                      cluster_row_slices = FALSE,
+                                      show_row_dend = TRUE,
+                                      row_title = 'Gene Symbol',
+                                      row_title_side = 'left',
+                                      row_title_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_title_rot = 90,
+                                      show_row_names = TRUE,
+                                      #right_annotation = ha,
+                                      row_names_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_names_side = 'right',
+                                      row_dend_width = unit(35, 'mm'),
+
+                                      cluster_columns = TRUE,
+                                      show_column_dend = TRUE,
+                                      column_title = 'ncRNA',
+                                      column_title_side = 'top',
+                                      column_title_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_title_rot = 0,
+                                      show_column_names = TRUE,
+                                      show_heatmap_legend = TRUE,
+                                      column_names_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_names_rot = 45,
+                                      row_km=0,
+                                      clustering_distance_columns = 'euclidean',
+                                      clustering_method_columns = 'ward.D2')
+
+```
+```{r fig.height=32, fig.width=12}
+# Subsetting
+MRNA.genes_matrix<-PCA_norm.filt_zs %>%
+rownames_to_column(var="SYMBOL")%>%
+  arrange((SYMBOL))%>%
+  semi_join(MRNA.genes, by= c("SYMBOL"= "SYMBOL"))%>%
+  column_to_rownames(var="SYMBOL")%>%
+  mutate(across(ends_with("CEL"),as.numeric)) %>%
+  as.matrix()
+#MRNA.genes_matrix<-scale_rows(MRNA.genes_matrix)
+###aplicar análise para definirkmeans do plot
+fviz_nbclust(MRNA.genes_matrix, kmeans, method = "wss")+
+  geom_vline(xintercept = 2, linetype = 2)
+
+##heatmap
+col_fun  <- colorRamp2(c(-2, 0, 2), c("darkblue", "white", "indianred"))
+df_colnames <- as.data.frame((colnames(MRNA.genes_matrix)))
+
+col_plasm<-colorRamp2(c(-2, 0, 2), plasma(3))
+
+haTerms_colnames <- HeatmapAnnotation(
+  df = df_colnames,
+  #col = col_fun,
+  Term = anno_text(
+    colnames(MRNA.genes_matrix),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold')),
+  annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+  annotation_name_side = 'left')
+
+Term = anno_text(
+  colnames(MRNA.genes_matrix),
+  rot = 45,
+  just = 'right',
+  gp = gpar(fontsize = 13, fontface = 'bold'))
+
+Heatmap(MRNA.genes_matrix,
+                                      name = 'z-score',
+                                      rect_gp = gpar(col = 'whitesmoke'),
+                                      col = col_plasm,
+                                      cluster_rows = TRUE,
+                                      cluster_row_slices = FALSE,
+                                      show_row_dend = TRUE,
+                                      row_title = 'Gene Symbol',
+                                      row_title_side = 'left',
+                                      row_title_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_title_rot = 90,
+                                      show_row_names = TRUE,
+                                      #right_annotation = ha,
+                                      row_names_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_names_side = 'right',
+                                      row_dend_width = unit(35, 'mm'),
+
+                                      cluster_columns = TRUE,
+                                      show_column_dend = TRUE,
+                                      column_title = 'mRNA',
+                                      column_title_side = 'top',
+                                      column_title_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_title_rot = 0,
+                                      show_column_names = TRUE,
+                                      show_heatmap_legend = TRUE,
+                                      column_names_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_names_rot = 45,
+                                      row_km=0,
+                                      clustering_distance_columns = 'euclidean',
+                                      clustering_method_columns = 'ward.D2')
+
+```
+```{r fig.height=32, fig.width=12}
+# Subsetting
+NUCLEARDIV.genes_matrix<-PCA_norm.filt_zs %>%
+rownames_to_column(var="SYMBOL")%>%
+  arrange((SYMBOL))%>%
+  semi_join(NUCLEARDIV.genes, by= c("SYMBOL"= "SYMBOL"))%>%
+  column_to_rownames(var="SYMBOL")%>%
+  mutate(across(ends_with("CEL"),as.numeric)) %>%
+  as.matrix()
+#NUCLEARDIV.genes_matrix<-scale_rows(NUCLEARDIV.genes_matrix)
+###aplicar análise para definirkmeans do plot
+fviz_nbclust(NUCLEARDIV.genes_matrix, kmeans, method = "wss")+
+  geom_vline(xintercept = 2, linetype = 2)
+
+##heatmap
+col_fun  <- colorRamp2(c(-2, 0, 2), c("darkblue", "white", "indianred"))
+df_colnames <- as.data.frame((colnames(NUCLEARDIV.genes_matrix)))
+
+col_plasm<-colorRamp2(c(-2, 0, 2), plasma(3))
+
+haTerms_colnames <- HeatmapAnnotation(
+  df = df_colnames,
+  #col = col_fun,
+  Term = anno_text(
+    colnames(NUCLEARDIV.genes_matrix),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold')),
+  annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+  annotation_name_side = 'left')
+
+Term = anno_text(
+  colnames(NUCLEARDIV.genes_matrix),
+  rot = 45,
+  just = 'right',
+  gp = gpar(fontsize = 13, fontface = 'bold'))
+
+Heatmap(NUCLEARDIV.genes_matrix,
+                                      name = 'z-score',
+                                      rect_gp = gpar(col = 'whitesmoke'),
+                                      col = col_plasm,
+                                      cluster_rows = TRUE,
+                                      cluster_row_slices = FALSE,
+                                      show_row_dend = TRUE,
+                                      row_title = 'Gene Symbol',
+                                      row_title_side = 'left',
+                                      row_title_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_title_rot = 90,
+                                      show_row_names = TRUE,
+                                      #right_annotation = ha,
+                                      row_names_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_names_side = 'right',
+                                      row_dend_width = unit(35, 'mm'),
+
+                                      cluster_columns = TRUE,
+                                      show_column_dend = TRUE,
+                                      column_title = 'Nuclear Division',
+                                      column_title_side = 'top',
+                                      column_title_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_title_rot = 0,
+                                      show_column_names = TRUE,
+                                      show_heatmap_legend = TRUE,
+                                      column_names_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_names_rot = 45,
+                                      row_km=2,
+                                      clustering_distance_columns = 'euclidean',
+                                      clustering_method_columns = 'ward.D2')
+
+```
+```{r fig.height=32, fig.width=12}
+# Subsetting
+MITSEGREGATION.genes_matrix<-PCA_norm.filt_zs %>%
+rownames_to_column(var="SYMBOL")%>%
+  arrange((SYMBOL))%>%
+  semi_join(MITSEGREGATION.genes, by= c("SYMBOL"= "SYMBOL"))%>%
+  column_to_rownames(var="SYMBOL")%>%
+  mutate(across(ends_with("CEL"),as.numeric)) %>%
+  as.matrix()
+#MITSEGREGATION.genes_matrix<-scale_rows(MITSEGREGATION.genes_matrix)
+###aplicar análise para definirkmeans do plot
+fviz_nbclust(MITSEGREGATION.genes_matrix, kmeans, method = "wss")+
+  geom_vline(xintercept = 2, linetype = 2)
+
+##heatmap
+col_fun  <- colorRamp2(c(-2, 0, 2), c("darkblue", "white", "indianred"))
+df_colnames <- as.data.frame((colnames(MITSEGREGATION.genes_matrix)))
+
+col_plasm<-colorRamp2(c(-2, 0, 2), plasma(3))
+
+haTerms_colnames <- HeatmapAnnotation(
+  df = df_colnames,
+  #col = col_fun,
+  Term = anno_text(
+    colnames(MITSEGREGATION.genes_matrix),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold')),
+  annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+  annotation_name_side = 'left')
+
+Term = anno_text(
+  colnames(MITSEGREGATION.genes_matrix),
+  rot = 45,
+  just = 'right',
+  gp = gpar(fontsize = 13, fontface = 'bold'))
+
+Heatmap(MITSEGREGATION.genes_matrix,
+                                      name = 'z-score',
+                                      rect_gp = gpar(col = 'whitesmoke'),
+                                      col = col_plasm,
+                                      cluster_rows = TRUE,
+                                      cluster_row_slices = FALSE,
+                                      show_row_dend = TRUE,
+                                      row_title = 'Gene Symbol',
+                                      row_title_side = 'left',
+                                      row_title_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_title_rot = 90,
+                                      show_row_names = TRUE,
+                                      #right_annotation = ha,
+                                      row_names_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_names_side = 'right',
+                                      row_dend_width = unit(35, 'mm'),
+
+                                      cluster_columns = TRUE,
+                                      show_column_dend = TRUE,
+                                      column_title = 'chromatid segregation',
+                                      column_title_side = 'top',
+                                      column_title_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_title_rot = 0,
+                                      show_column_names = TRUE,
+                                      show_heatmap_legend = TRUE,
+                                      column_names_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_names_rot = 45,
+                                      row_km=2,
+                                      clustering_distance_columns = 'euclidean',
+                                      clustering_method_columns = 'ward.D2')
+
+```
+
+```{r}
+PC2_NESposdf <- as.data.frame(PC2_NESpos)
+
+PC2_NESposdf <- PC2_NESposdf %>%
+  dplyr::select(Description, core_enrichment)
+genes.PC2posID<- str_split(PC2_NESposdf$core_enrichment, "/", simplify = T) %>%
+  t()
+colnames(genes.PC2posID) <- PC2_NESposdf$Description
+
+#Define the clusters using the trplot info
+
+oxidative_phosphorylation <- c("oxidative phosphorylation",
+"aerobic respiration"," electron transport chain",
+"cellular respiration",
+"energy derivation by oxidation of organic compounds",
+"generation of precursor metabolites and energy")
+
+lipid_biosynthetic_process <- c("lipid biosynthetic process",
+"glycerolipid metabolic process", "steroid biosynthetic process",
+"steroid metabolic process", "glycerolipid biosynthetic process",
+"fatty acid metabolic process")
+
+phospholipid_metabolic_process <- c("phospholipid metabolic process",
+"glycerophospholipid metabolic process",
+"glycerophospholipid biosynthetic process",
+"phospholipid biosynthetic process",
+"organophosphate biosynthetic process",
+"phosphatidylinositol biosynthetic process",
+"phosphatidylinositol metabolic process")
+
+#Create object with cluster information
+genes.PC2posID.longer <- genes.PC2posID %>%
+  as.data.frame() %>%
+  tidyr::pivot_longer(everything(), names_to = "Description", values_to= "Genes") %>%
+  filter(Genes != "") %>%
+    mutate(Cluster= case_when(Description %in% oxidative_phosphorylation ~ "oxidative_phosphorylation",
+                              Description %in% lipid_biosynthetic_process ~ "lipid_biosynthetic_process",
+                              Description %in% phospholipid_metabolic_process ~ "phospholipid_metabolic_process"
+                              )) %>%
+  tidyr::drop_na()
+
+#get gene symbols
+genes.PC2posID.longer$SYMBOL <-
+  entrz_name$SYMBOL[match(genes.PC2posID.longer$Genes,
+                                entrz_name$ENTREZID)]
+
+#Visualize expression of genes in cluster 1 (BLOODVMORPHO)
+OXPHOSPHORILATION.genes<- genes.PC2posID.longer %>%
+  filter(Cluster == "oxidative_phosphorylation") %>%
+  as.data.frame() %>%
+  dplyr::select(SYMBOL) %>%
+  distinct()
+
+#Visualize expression of genes in cluster 1 (CELLADHESION)
+LIPIDBIO.genes<- genes.PC2posID.longer %>%
+  filter(Cluster == "lipid_biosynthetic_process") %>%
+  as.data.frame() %>%
+  dplyr::select(SYMBOL) %>%
+  distinct()
+
+#Visualize expression of genes in cluster 1 (LIPID)
+PHOSPHOLIPID.genes<- genes.PC2posID.longer %>%
+  filter(Cluster == "phospholipid_metabolic_process") %>%
+  as.data.frame() %>%
+  dplyr::select(SYMBOL) %>%
+  distinct()
+```
+
+```{r fig.height=32, fig.width=12}
+# Subsetting
+OXPHOSPHORILATION.genes_matrix<-PCA_norm.filt_zs %>%
+rownames_to_column(var="SYMBOL")%>%
+  arrange((SYMBOL))%>%
+  semi_join(OXPHOSPHORILATION.genes, by= c("SYMBOL"= "SYMBOL"))%>%
+  column_to_rownames(var="SYMBOL")%>%
+  mutate(across(ends_with("CEL"),as.numeric)) %>%
+  as.matrix()
+#OXPHOSPHORILATION.genes_matrix<-scale_rows(OXPHOSPHORILATION.genes_matrix)
+###aplicar análise para definirkmeans do plot
+fviz_nbclust(OXPHOSPHORILATION.genes_matrix, kmeans, method = "wss")+
+  geom_vline(xintercept = 2, linetype = 2)
+
+##heatmap
+col_fun  <- colorRamp2(c(-2, 0, 2), c("darkblue", "white", "indianred"))
+df_colnames <- as.data.frame((colnames(OXPHOSPHORILATION.genes_matrix)))
+
+col_plasm<-colorRamp2(c(-2, 0, 2), plasma(3))
+
+haTerms_colnames <- HeatmapAnnotation(
+  df = df_colnames,
+  #col = col_fun,
+  Term = anno_text(
+    colnames(OXPHOSPHORILATION.genes_matrix),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold')),
+  annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+  annotation_name_side = 'left')
+
+Term = anno_text(
+  colnames(OXPHOSPHORILATION.genes_matrix),
+  rot = 45,
+  just = 'right',
+  gp = gpar(fontsize = 13, fontface = 'bold'))
+
+Heatmap(OXPHOSPHORILATION.genes_matrix,
+                                      name = 'z-score',
+                                      rect_gp = gpar(col = 'whitesmoke'),
+                                      col = col_plasm,
+                                      cluster_rows = TRUE,
+                                      cluster_row_slices = FALSE,
+                                      show_row_dend = TRUE,
+                                      row_title = 'Gene Symbol',
+                                      row_title_side = 'left',
+                                      row_title_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_title_rot = 90,
+                                      show_row_names = TRUE,
+                                      #right_annotation = ha,
+                                      row_names_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_names_side = 'right',
+                                      row_dend_width = unit(35, 'mm'),
+
+                                      cluster_columns = TRUE,
+                                      show_column_dend = TRUE,
+                                      column_title = 'Oxidative Phosphorilation',
+                                      column_title_side = 'top',
+                                      column_title_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_title_rot = 0,
+                                      show_column_names = TRUE,
+                                      show_heatmap_legend = TRUE,
+                                      column_names_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_names_rot = 45,
+                                      row_km=0,
+                                      clustering_distance_columns = 'euclidean',
+                                      clustering_method_columns = 'ward.D2')
+
+```
+
+```{r fig.height=32, fig.width=12}
+# Subsetting
+LIPIDBIO.genes_matrix<-PCA_norm.filt_zs %>%
+rownames_to_column(var="SYMBOL")%>%
+  arrange((SYMBOL))%>%
+  semi_join(LIPIDBIO.genes, by= c("SYMBOL"= "SYMBOL"))%>%
+  column_to_rownames(var="SYMBOL")%>%
+  mutate(across(ends_with("CEL"),as.numeric)) %>%
+  as.matrix()
+#LIPIDBIO.genes_matrix<-scale_rows(LIPIDBIO.genes_matrix)
+###aplicar análise para definirkmeans do plot
+fviz_nbclust(LIPIDBIO.genes_matrix, kmeans, method = "wss")+
+  geom_vline(xintercept = 2, linetype = 2)
+
+##heatmap
+col_fun  <- colorRamp2(c(-2, 0, 2), c("darkblue", "white", "indianred"))
+df_colnames <- as.data.frame((colnames(LIPIDBIO.genes_matrix)))
+
+col_plasm<-colorRamp2(c(-2, 0, 2), plasma(3))
+
+haTerms_colnames <- HeatmapAnnotation(
+  df = df_colnames,
+  #col = col_fun,
+  Term = anno_text(
+    colnames(LIPIDBIO.genes_matrix),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold')),
+  annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+  annotation_name_side = 'left')
+
+Term = anno_text(
+  colnames(LIPIDBIO.genes_matrix),
+  rot = 45,
+  just = 'right',
+  gp = gpar(fontsize = 13, fontface = 'bold'))
+
+Heatmap(LIPIDBIO.genes_matrix,
+                                      name = 'z-score',
+                                      rect_gp = gpar(col = 'whitesmoke'),
+                                      col = col_plasm,
+                                      cluster_rows = TRUE,
+                                      cluster_row_slices = FALSE,
+                                      show_row_dend = TRUE,
+                                      row_title = 'Gene Symbol',
+                                      row_title_side = 'left',
+                                      row_title_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_title_rot = 90,
+                                      show_row_names = TRUE,
+                                      #right_annotation = ha,
+                                      row_names_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_names_side = 'right',
+                                      row_dend_width = unit(35, 'mm'),
+
+                                      cluster_columns = TRUE,
+                                      show_column_dend = TRUE,
+                                      column_title = 'Lipid Biosynthetic process',
+                                      column_title_side = 'top',
+                                      column_title_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_title_rot = 0,
+                                      show_column_names = TRUE,
+                                      show_heatmap_legend = TRUE,
+                                      column_names_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_names_rot = 45,
+                                      row_km=0,
+                                      clustering_distance_columns = 'euclidean',
+                                      clustering_method_columns = 'ward.D2')
+```
+
+```{r fig.height=32, fig.width=12}
+# Subsetting
+PHOSPHOLIPID.genes_matrix<-PCA_norm.filt_zs %>%
+rownames_to_column(var="SYMBOL")%>%
+  arrange((SYMBOL))%>%
+  semi_join(PHOSPHOLIPID.genes, by= c("SYMBOL"= "SYMBOL"))%>%
+  column_to_rownames(var="SYMBOL")%>%
+  mutate(across(ends_with("CEL"),as.numeric)) %>%
+  as.matrix()
+#PHOSPHOLIPID.genes_matrix<-scale_rows(PHOSPHOLIPID.genes_matrix)
+###aplicar análise para definirkmeans do plot
+fviz_nbclust(PHOSPHOLIPID.genes_matrix, kmeans, method = "wss")+
+  geom_vline(xintercept = 2, linetype = 2)
+
+##heatmap
+col_fun  <- colorRamp2(c(-2, 0, 2), c("darkblue", "white", "indianred"))
+df_colnames <- as.data.frame((colnames(PHOSPHOLIPID.genes_matrix)))
+
+col_plasm<-colorRamp2(c(-2, 0, 2), plasma(3))
+
+haTerms_colnames <- HeatmapAnnotation(
+  df = df_colnames,
+  #col = col_fun,
+  Term = anno_text(
+    colnames(PHOSPHOLIPID.genes_matrix),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold')),
+  annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+  annotation_name_side = 'left')
+
+Term = anno_text(
+  colnames(PHOSPHOLIPID.genes_matrix),
+  rot = 45,
+  just = 'right',
+  gp = gpar(fontsize = 13, fontface = 'bold'))
+
+Heatmap(PHOSPHOLIPID.genes_matrix,
+                                      name = 'z-score',
+                                      rect_gp = gpar(col = 'whitesmoke'),
+                                      col = col_plasm,
+                                      cluster_rows = TRUE,
+                                      cluster_row_slices = FALSE,
+                                      show_row_dend = TRUE,
+                                      row_title = 'Gene Symbol',
+                                      row_title_side = 'left',
+                                      row_title_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_title_rot = 90,
+                                      show_row_names = TRUE,
+                                      #right_annotation = ha,
+                                      row_names_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_names_side = 'right',
+                                      row_dend_width = unit(35, 'mm'),
+
+                                      cluster_columns = TRUE,
+                                      show_column_dend = TRUE,
+                                      column_title = 'Phospholipid metabolic process',
+                                      column_title_side = 'top',
+                                      column_title_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_title_rot = 0,
+                                      show_column_names = TRUE,
+                                      show_heatmap_legend = TRUE,
+                                      column_names_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_names_rot = 45,
+                                      row_km=0,
+                                      clustering_distance_columns = 'euclidean',
+                                      clustering_method_columns = 'ward.D2')
+```
+
+```{r}
+PC2_NESnegdf <- as.data.frame(PC2_NESneg)
+
+PC2_NESnegdf <- PC2_NESnegdf %>%
+  dplyr::select(Description, core_enrichment)
+genes.PC2negID<- str_split(PC2_NESnegdf$core_enrichment, "/", simplify = T) %>%
+  t()
+colnames(genes.PC2negID) <- PC2_NESnegdf$Description
+
+#Define the clusters using the trplot info
+
+blood_vessel_morphogenesis <- c("blood vessel morphogenesis",
+"angiogenesis", "heart morphogenesis",
+"regulation of vasculature development",
+"blood vessel development", "vasculature development",
+"regulation of angiogenesis","positive regulation of vasculature development",
+"positive regulation of angiogenesis","heart development")
+
+DNA_pacckaging <- c("DNA packaging", "chromatin assembly or disassembly",
+"DNA conformation change", "chromatin remodeling",
+"regulation of chromosome organization")
+
+chromosome_segregation <- c("chromosome segregation",
+"mitotic sister chromatid segregation","sister chromatid segregation",
+"nuclear chromosome segregation")
+
+kinase_activity <- c("positive regulation of kinase activity",
+"positive regulation of transferase activity",
+"regulation of kinase activity",
+"positive regulation of protein kinase activity",
+"regulation of protein kinase activity")
+
+#Create object with cluster information
+genes.PC2negID.longer <- genes.PC2negID %>%
+  as.data.frame() %>%
+  tidyr::pivot_longer(everything(), names_to = "Description", values_to= "Genes") %>%
+  filter(Genes != "") %>%
+    mutate(Cluster= case_when(Description %in% blood_vessel_morphogenesis ~ "blood_vessel_morphogenesis",
+                              Description %in% DNA_pacckaging ~ "DNA_pacckaging",
+                              Description %in% chromosome_segregation ~ "chromosome_segregation",
+                               Description %in% kinase_activity ~ "kinase_activity")) %>%
+  tidyr::drop_na()
+
+#get gene symbols
+genes.PC2negID.longer$SYMBOL <-
+  entrz_name$SYMBOL[match(genes.PC2negID.longer$Genes,
+                                entrz_name$ENTREZID)]
+
+#Visualize expression of genes in cluster 1 (BLOODVMORPHO)
+VESSELMORPHO.genes<- genes.PC2negID.longer %>%
+  filter(Cluster == "blood_vessel_morphogenesis") %>%
+  as.data.frame() %>%
+  dplyr::select(SYMBOL) %>%
+  distinct()
+
+#Visualize expression of genes in cluster 1 (CELLADHESION)
+DNAPACK.genes<- genes.PC2negID.longer %>%
+  filter(Cluster == "DNA_pacckaging") %>%
+  as.data.frame() %>%
+  dplyr::select(SYMBOL) %>%
+  distinct()
+
+#Visualize expression of genes in cluster 1 (LIPID)
+CHROMOSSOMESEG.genes<- genes.PC2negID.longer %>%
+  filter(Cluster == "chromosome_segregation") %>%
+  as.data.frame() %>%
+  dplyr::select(SYMBOL) %>%
+  distinct()
+
+KINASE.genes<- genes.PC2negID.longer %>%
+  filter(Cluster == "kinase_activity") %>%
+  as.data.frame() %>%
+  dplyr::select(SYMBOL) %>%
+  distinct()
+```
+
+```{r fig.height=32, fig.width=12}
+# Subsetting
+VESSELMORPHO.genes_matrix<-PCA_norm.filt_zs %>%
+rownames_to_column(var="SYMBOL")%>%
+  arrange((SYMBOL))%>%
+  semi_join(VESSELMORPHO.genes, by= c("SYMBOL"= "SYMBOL"))%>%
+  column_to_rownames(var="SYMBOL")%>%
+  mutate(across(ends_with("CEL"),as.numeric)) %>%
+  as.matrix()
+#VESSELMORPHO.genes_matrix<-scale_rows(VESSELMORPHO.genes_matrix)
+###aplicar análise para definirkmeans do plot
+fviz_nbclust(VESSELMORPHO.genes_matrix, kmeans, method = "wss")+
+  geom_vline(xintercept = 2, linetype = 2)
+
+##heatmap
+col_fun  <- colorRamp2(c(-2, 0, 2), c("darkblue", "white", "indianred"))
+df_colnames <- as.data.frame((colnames(VESSELMORPHO.genes_matrix)))
+
+col_plasm<-colorRamp2(c(-2, 0, 2), plasma(3))
+
+haTerms_colnames <- HeatmapAnnotation(
+  df = df_colnames,
+  #col = col_fun,
+  Term = anno_text(
+    colnames(VESSELMORPHO.genes_matrix),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold')),
+  annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+  annotation_name_side = 'left')
+
+Term = anno_text(
+  colnames(VESSELMORPHO.genes_matrix),
+  rot = 45,
+  just = 'right',
+  gp = gpar(fontsize = 13, fontface = 'bold'))
+
+Heatmap(VESSELMORPHO.genes_matrix,
+                                      name = 'z-score',
+                                      rect_gp = gpar(col = 'whitesmoke'),
+                                      col = col_plasm,
+                                      cluster_rows = TRUE,
+                                      cluster_row_slices = FALSE,
+                                      show_row_dend = TRUE,
+                                      row_title = 'Gene Symbol',
+                                      row_title_side = 'left',
+                                      row_title_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_title_rot = 90,
+                                      show_row_names = TRUE,
+                                      #right_annotation = ha,
+                                      row_names_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_names_side = 'right',
+                                      row_dend_width = unit(35, 'mm'),
+
+                                      cluster_columns = TRUE,
+                                      show_column_dend = TRUE,
+                                      column_title = 'Blood vessel morphogenesis',
+                                      column_title_side = 'top',
+                                      column_title_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_title_rot = 0,
+                                      show_column_names = TRUE,
+                                      show_heatmap_legend = TRUE,
+                                      column_names_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_names_rot = 45,
+                                      row_km=2,
+                                      clustering_distance_columns = 'euclidean',
+                                      clustering_method_columns = 'ward.D2')
+
+```
+
+```{r fig.height=32, fig.width=12}
+# Subsetting
+DNAPACK.genes_matrix<-PCA_norm.filt_zs %>%
+rownames_to_column(var="SYMBOL")%>%
+  arrange((SYMBOL))%>%
+  semi_join(DNAPACK.genes, by= c("SYMBOL"= "SYMBOL"))%>%
+  column_to_rownames(var="SYMBOL")%>%
+  mutate(across(ends_with("CEL"),as.numeric)) %>%
+  as.matrix()
+#DNAPACK.genes_matrix<-scale_rows(DNAPACK.genes_matrix)
+###aplicar análise para definirkmeans do plot
+fviz_nbclust(DNAPACK.genes_matrix, kmeans, method = "wss")+
+  geom_vline(xintercept = 2, linetype = 2)
+
+##heatmap
+col_fun  <- colorRamp2(c(-2, 0, 2), c("darkblue", "white", "indianred"))
+df_colnames <- as.data.frame((colnames(DNAPACK.genes_matrix)))
+
+col_plasm<-colorRamp2(c(-2, 0, 2), plasma(3))
+
+haTerms_colnames <- HeatmapAnnotation(
+  df = df_colnames,
+  #col = col_fun,
+  Term = anno_text(
+    colnames(DNAPACK.genes_matrix),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold')),
+  annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+  annotation_name_side = 'left')
+
+Term = anno_text(
+  colnames(DNAPACK.genes_matrix),
+  rot = 45,
+  just = 'right',
+  gp = gpar(fontsize = 13, fontface = 'bold'))
+
+Heatmap(DNAPACK.genes_matrix,
+                                      name = 'z-score',
+                                      rect_gp = gpar(col = 'whitesmoke'),
+                                      col = col_plasm,
+                                      cluster_rows = TRUE,
+                                      cluster_row_slices = FALSE,
+                                      show_row_dend = TRUE,
+                                      row_title = 'Gene Symbol',
+                                      row_title_side = 'left',
+                                      row_title_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_title_rot = 90,
+                                      show_row_names = TRUE,
+                                      #right_annotation = ha,
+                                      row_names_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_names_side = 'right',
+                                      row_dend_width = unit(35, 'mm'),
+
+                                      cluster_columns = TRUE,
+                                      show_column_dend = TRUE,
+                                      column_title = 'DNA packaging',
+                                      column_title_side = 'top',
+                                      column_title_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_title_rot = 0,
+                                      show_column_names = TRUE,
+                                      show_heatmap_legend = TRUE,
+                                      column_names_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_names_rot = 45,
+                                      row_km=0,
+                                      clustering_distance_columns = 'euclidean',
+                                      clustering_method_columns = 'ward.D2')
+
+```
+
+```{r fig.height=32, fig.width=12}
+# Subsetting
+CHROMOSSOMESEG.genes_matrix<-PCA_norm.filt_zs %>%
+rownames_to_column(var="SYMBOL")%>%
+  arrange((SYMBOL))%>%
+  semi_join(CHROMOSSOMESEG.genes, by= c("SYMBOL"= "SYMBOL"))%>%
+  column_to_rownames(var="SYMBOL")%>%
+  mutate(across(ends_with("CEL"),as.numeric)) %>%
+  as.matrix()
+#CHROMOSSOMESEG.genes_matrix<-scale_rows(CHROMOSSOMESEG.genes_matrix)
+###aplicar análise para definirkmeans do plot
+fviz_nbclust(CHROMOSSOMESEG.genes_matrix, kmeans, method = "wss")+
+  geom_vline(xintercept = 2, linetype = 2)
+
+##heatmap
+col_fun  <- colorRamp2(c(-2, 0, 2), c("darkblue", "white", "indianred"))
+df_colnames <- as.data.frame((colnames(CHROMOSSOMESEG.genes_matrix)))
+
+col_plasm<-colorRamp2(c(-2, 0, 2), plasma(3))
+
+haTerms_colnames <- HeatmapAnnotation(
+  df = df_colnames,
+  #col = col_fun,
+  Term = anno_text(
+    colnames(CHROMOSSOMESEG.genes_matrix),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold')),
+  annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+  annotation_name_side = 'left')
+
+Term = anno_text(
+  colnames(CHROMOSSOMESEG.genes_matrix),
+  rot = 45,
+  just = 'right',
+  gp = gpar(fontsize = 13, fontface = 'bold'))
+
+Heatmap(CHROMOSSOMESEG.genes_matrix,
+                                      name = 'z-score',
+                                      rect_gp = gpar(col = 'whitesmoke'),
+                                      col = col_plasm,
+                                      cluster_rows = TRUE,
+                                      cluster_row_slices = FALSE,
+                                      show_row_dend = TRUE,
+                                      row_title = 'Gene Symbol',
+                                      row_title_side = 'left',
+                                      row_title_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_title_rot = 90,
+                                      show_row_names = TRUE,
+                                      #right_annotation = ha,
+                                      row_names_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_names_side = 'right',
+                                      row_dend_width = unit(35, 'mm'),
+
+                                      cluster_columns = TRUE,
+                                      show_column_dend = TRUE,
+                                      column_title = 'Chromossome Segregation',
+                                      column_title_side = 'top',
+                                      column_title_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_title_rot = 0,
+                                      show_column_names = TRUE,
+                                      show_heatmap_legend = TRUE,
+                                      column_names_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_names_rot = 45,
+                                      row_km=0,
+                                      clustering_distance_columns = 'euclidean',
+                                      clustering_method_columns = 'ward.D2')
+
+```
+
+```{r fig.height=32, fig.width=12}
+# Subsetting
+KINASE.genes_matrix<-PCA_norm.filt_zs %>%
+rownames_to_column(var="SYMBOL")%>%
+  arrange((SYMBOL))%>%
+  semi_join(KINASE.genes, by= c("SYMBOL"= "SYMBOL"))%>%
+  column_to_rownames(var="SYMBOL")%>%
+  mutate(across(ends_with("CEL"),as.numeric)) %>%
+  as.matrix()
+#KINASE.genes_matrix<-scale_rows(KINASE.genes_matrix)
+###aplicar análise para definirkmeans do plot
+fviz_nbclust(KINASE.genes_matrix, kmeans, method = "wss")+
+  geom_vline(xintercept = 2, linetype = 2)
+
+##heatmap
+col_fun  <- colorRamp2(c(-2, 0, 2), c("darkblue", "white", "indianred"))
+df_colnames <- as.data.frame((colnames(KINASE.genes_matrix)))
+
+col_plasm<-colorRamp2(c(-2, 0, 2), plasma(3))
+
+haTerms_colnames <- HeatmapAnnotation(
+  df = df_colnames,
+  #col = col_fun,
+  Term = anno_text(
+    colnames(KINASE.genes_matrix),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold')),
+  annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+  annotation_name_side = 'left')
+
+Term = anno_text(
+  colnames(KINASE.genes_matrix),
+  rot = 45,
+  just = 'right',
+  gp = gpar(fontsize = 13, fontface = 'bold'))
+
+Heatmap(KINASE.genes_matrix,
+                                      name = 'z-score',
+                                      rect_gp = gpar(col = 'whitesmoke'),
+                                      col = col_plasm,
+                                      cluster_rows = TRUE,
+                                      cluster_row_slices = FALSE,
+                                      show_row_dend = TRUE,
+                                      row_title = 'Gene Symbol',
+                                      row_title_side = 'left',
+                                      row_title_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_title_rot = 90,
+                                      show_row_names = TRUE,
+                                      #right_annotation = ha,
+                                      row_names_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_names_side = 'right',
+                                      row_dend_width = unit(35, 'mm'),
+
+                                      cluster_columns = TRUE,
+                                      show_column_dend = TRUE,
+                                      column_title = 'Positive regulation of kinase activity',
+                                      column_title_side = 'top',
+                                      column_title_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_title_rot = 0,
+                                      show_column_names = TRUE,
+                                      show_heatmap_legend = TRUE,
+                                      column_names_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_names_rot = 45,
+                                      row_km=2,
+                                      clustering_distance_columns = 'euclidean',
+                                      clustering_method_columns = 'ward.D2')
+
+```
+
+```{r}
+PC3_NESposdf <- as.data.frame(PC3_NESpos)
+
+PC3_NESposdf <- PC3_NESposdf %>%
+  dplyr::select(Description, core_enrichment)
+genes.PC3posID<- str_split(PC3_NESposdf$core_enrichment, "/", simplify = T) %>%
+  t()
+colnames(genes.PC3posID) <- PC3_NESposdf$Description
+
+#Define the clusters using the trplot info
+
+oxidative_phosphorylation <- c("oxidative phosphorylation",
+"aerobic respiration"," electron transport chain",
+"cellular respiration",
+"energy derivation by oxidation of organic compounds",
+"generation of precursor metabolites and energy")
+
+lipid_biosynthetic_process <- c("lipid biosynthetic process",
+"glycerolipid metabolic process", "steroid biosynthetic process",
+"steroid metabolic process", "glycerolipid biosynthetic process",
+"fatty acid metabolic process")
+
+phospholipid_metabolic_process <- c("phospholipid metabolic process",
+"glycerophospholipid metabolic process",
+"glycerophospholipid biosynthetic process",
+"phospholipid biosynthetic process",
+"organophosphate biosynthetic process",
+"phosphatidylinositol biosynthetic process",
+"phosphatidylinositol metabolic process")
+
+#Create object with cluster information
+genes.PC3posID.longer <- genes.PC3posID %>%
+  as.data.frame() %>%
+  tidyr::pivot_longer(everything(), names_to = "Description", values_to= "Genes") %>%
+  filter(Genes != "") %>%
+    mutate(Cluster= case_when(Description %in% oxidative_phosphorylation ~ "oxidative_phosphorylation",
+                              Description %in% lipid_biosynthetic_process ~ "lipid_biosynthetic_process",
+                              Description %in% phospholipid_metabolic_process ~ "phospholipid_metabolic_process"
+                              )) %>%
+  tidyr::drop_na()
+
+#get gene symbols
+genes.PC3posID.longer$SYMBOL <-
+  entrz_name$SYMBOL[match(genes.PC3posID.longer$Genes,
+                                entrz_name$ENTREZID)]
+
+#Visualize expression of genes in cluster 1 (BLOODVMORPHO)
+OXPHOSPHORILATION.genes<- genes.PC3posID.longer %>%
+  filter(Cluster == "oxidative_phosphorylation") %>%
+  as.data.frame() %>%
+  dplyr::select(SYMBOL) %>%
+  distinct()
+
+#Visualize expression of genes in cluster 1 (CELLADHESION)
+LIPIDBIO.genes<- genes.PC3posID.longer %>%
+  filter(Cluster == "lipid_biosynthetic_process") %>%
+  as.data.frame() %>%
+  dplyr::select(SYMBOL) %>%
+  distinct()
+
+#Visualize expression of genes in cluster 1 (LIPID)
+PHOSPHOLIPID.genes<- genes.PC3posID.longer %>%
+  filter(Cluster == "phospholipid_metabolic_process") %>%
+  as.data.frame() %>%
+  dplyr::select(SYMBOL) %>%
+  distinct()
+```
+
+```{r fig.height=32, fig.width=12}
+# Subsetting
+OXPHOSPHORILATION.genes_matrix<-PCA_norm.filt_zs %>%
+rownames_to_column(var="SYMBOL")%>%
+  arrange((SYMBOL))%>%
+  semi_join(OXPHOSPHORILATION.genes, by= c("SYMBOL"= "SYMBOL"))%>%
+  column_to_rownames(var="SYMBOL")%>%
+  mutate(across(ends_with("CEL"),as.numeric)) %>%
+  as.matrix()
+#OXPHOSPHORILATION.genes_matrix<-scale_rows(OXPHOSPHORILATION.genes_matrix)
+###aplicar análise para definirkmeans do plot
+fviz_nbclust(OXPHOSPHORILATION.genes_matrix, kmeans, method = "wss")+
+  geom_vline(xintercept = 2, linetype = 2)
+
+##heatmap
+col_fun  <- colorRamp2(c(-2, 0, 2), c("darkblue", "white", "indianred"))
+df_colnames <- as.data.frame((colnames(OXPHOSPHORILATION.genes_matrix)))
+
+col_plasm<-colorRamp2(c(-2, 0, 2), plasma(3))
+
+haTerms_colnames <- HeatmapAnnotation(
+  df = df_colnames,
+  #col = col_fun,
+  Term = anno_text(
+    colnames(OXPHOSPHORILATION.genes_matrix),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold')),
+  annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+  annotation_name_side = 'left')
+
+Term = anno_text(
+  colnames(OXPHOSPHORILATION.genes_matrix),
+  rot = 45,
+  just = 'right',
+  gp = gpar(fontsize = 13, fontface = 'bold'))
+
+Heatmap(OXPHOSPHORILATION.genes_matrix,
+                                      name = 'z-score',
+                                      rect_gp = gpar(col = 'whitesmoke'),
+                                      col = col_plasm,
+                                      cluster_rows = TRUE,
+                                      cluster_row_slices = FALSE,
+                                      show_row_dend = TRUE,
+                                      row_title = 'Gene Symbol',
+                                      row_title_side = 'left',
+                                      row_title_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_title_rot = 90,
+                                      show_row_names = TRUE,
+                                      #right_annotation = ha,
+                                      row_names_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_names_side = 'right',
+                                      row_dend_width = unit(35, 'mm'),
+
+                                      cluster_columns = TRUE,
+                                      show_column_dend = TRUE,
+                                      column_title = 'Oxidative Phosphorilation',
+                                      column_title_side = 'top',
+                                      column_title_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_title_rot = 0,
+                                      show_column_names = TRUE,
+                                      show_heatmap_legend = TRUE,
+                                      column_names_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_names_rot = 45,
+                                      row_km=0,
+                                      clustering_distance_columns = 'euclidean',
+                                      clustering_method_columns = 'ward.D2')
+
+```
+
+```{r fig.height=32, fig.width=12}
+# Subsetting
+LIPIDBIO.genes_matrix<-PCA_norm.filt_zs %>%
+rownames_to_column(var="SYMBOL")%>%
+  arrange((SYMBOL))%>%
+  semi_join(LIPIDBIO.genes, by= c("SYMBOL"= "SYMBOL"))%>%
+  column_to_rownames(var="SYMBOL")%>%
+  mutate(across(ends_with("CEL"),as.numeric)) %>%
+  as.matrix()
+#LIPIDBIO.genes_matrix<-scale_rows(LIPIDBIO.genes_matrix)
+###aplicar análise para definirkmeans do plot
+fviz_nbclust(LIPIDBIO.genes_matrix, kmeans, method = "wss")+
+  geom_vline(xintercept = 2, linetype = 2)
+
+##heatmap
+col_fun  <- colorRamp2(c(-2, 0, 2), c("darkblue", "white", "indianred"))
+df_colnames <- as.data.frame((colnames(LIPIDBIO.genes_matrix)))
+
+col_plasm<-colorRamp2(c(-2, 0, 2), plasma(3))
+
+haTerms_colnames <- HeatmapAnnotation(
+  df = df_colnames,
+  #col = col_fun,
+  Term = anno_text(
+    colnames(LIPIDBIO.genes_matrix),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold')),
+  annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+  annotation_name_side = 'left')
+
+Term = anno_text(
+  colnames(LIPIDBIO.genes_matrix),
+  rot = 45,
+  just = 'right',
+  gp = gpar(fontsize = 13, fontface = 'bold'))
+
+Heatmap(LIPIDBIO.genes_matrix,
+                                      name = 'z-score',
+                                      rect_gp = gpar(col = 'whitesmoke'),
+                                      col = col_plasm,
+                                      cluster_rows = TRUE,
+                                      cluster_row_slices = FALSE,
+                                      show_row_dend = TRUE,
+                                      row_title = 'Gene Symbol',
+                                      row_title_side = 'left',
+                                      row_title_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_title_rot = 90,
+                                      show_row_names = TRUE,
+                                      #right_annotation = ha,
+                                      row_names_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_names_side = 'right',
+                                      row_dend_width = unit(35, 'mm'),
+
+                                      cluster_columns = TRUE,
+                                      show_column_dend = TRUE,
+                                      column_title = 'Lipid Biosynthetic process',
+                                      column_title_side = 'top',
+                                      column_title_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_title_rot = 0,
+                                      show_column_names = TRUE,
+                                      show_heatmap_legend = TRUE,
+                                      column_names_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_names_rot = 45,
+                                      row_km=0,
+                                      clustering_distance_columns = 'euclidean',
+                                      clustering_method_columns = 'ward.D2')
+```
+
+```{r fig.height=32, fig.width=12}
+# Subsetting
+PHOSPHOLIPID.genes_matrix<-PCA_norm.filt_zs %>%
+rownames_to_column(var="SYMBOL")%>%
+  arrange((SYMBOL))%>%
+  semi_join(PHOSPHOLIPID.genes, by= c("SYMBOL"= "SYMBOL"))%>%
+  column_to_rownames(var="SYMBOL")%>%
+  mutate(across(ends_with("CEL"),as.numeric)) %>%
+  as.matrix()
+#PHOSPHOLIPID.genes_matrix<-scale_rows(PHOSPHOLIPID.genes_matrix)
+###aplicar análise para definirkmeans do plot
+fviz_nbclust(PHOSPHOLIPID.genes_matrix, kmeans, method = "wss")+
+  geom_vline(xintercept = 2, linetype = 2)
+
+##heatmap
+col_fun  <- colorRamp2(c(-2, 0, 2), c("darkblue", "white", "indianred"))
+df_colnames <- as.data.frame((colnames(PHOSPHOLIPID.genes_matrix)))
+
+col_plasm<-colorRamp2(c(-2, 0, 2), plasma(3))
+
+haTerms_colnames <- HeatmapAnnotation(
+  df = df_colnames,
+  #col = col_fun,
+  Term = anno_text(
+    colnames(PHOSPHOLIPID.genes_matrix),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold')),
+  annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+  annotation_name_side = 'left')
+
+Term = anno_text(
+  colnames(PHOSPHOLIPID.genes_matrix),
+  rot = 45,
+  just = 'right',
+  gp = gpar(fontsize = 13, fontface = 'bold'))
+
+Heatmap(PHOSPHOLIPID.genes_matrix,
+                                      name = 'z-score',
+                                      rect_gp = gpar(col = 'whitesmoke'),
+                                      col = col_plasm,
+                                      cluster_rows = TRUE,
+                                      cluster_row_slices = FALSE,
+                                      show_row_dend = TRUE,
+                                      row_title = 'Gene Symbol',
+                                      row_title_side = 'left',
+                                      row_title_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_title_rot = 90,
+                                      show_row_names = TRUE,
+                                      #right_annotation = ha,
+                                      row_names_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_names_side = 'right',
+                                      row_dend_width = unit(35, 'mm'),
+
+                                      cluster_columns = TRUE,
+                                      show_column_dend = TRUE,
+                                      column_title = 'Phospholipid metabolic process',
+                                      column_title_side = 'top',
+                                      column_title_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_title_rot = 0,
+                                      show_column_names = TRUE,
+                                      show_heatmap_legend = TRUE,
+                                      column_names_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_names_rot = 45,
+                                      row_km=0,
+                                      clustering_distance_columns = 'euclidean',
+                                      clustering_method_columns = 'ward.D2')
+```
+
+```{r}
+PC3_NESnegdf <- as.data.frame(PC3_NESneg)
+
+PC3_NESnegdf <- PC3_NESnegdf %>%
+  dplyr::select(Description, core_enrichment)
+genes.PC3negID<- str_split(PC3_NESnegdf$core_enrichment, "/", simplify = T) %>%
+  t()
+colnames(genes.PC3negID) <- PC3_NESnegdf$Description
+
+#Define the clusters using the trplot info
+
+blood_vessel_morphogenesis <- c("blood vessel morphogenesis",
+"angiogenesis", "heart morphogenesis",
+"regulation of vasculature development",
+"blood vessel development", "vasculature development",
+"regulation of angiogenesis","positive regulation of vasculature development",
+"positive regulation of angiogenesis","heart development")
+
+DNA_pacckaging <- c("DNA packaging", "chromatin assembly or disassembly",
+"DNA conformation change", "chromatin remodeling",
+"regulation of chromosome organization")
+
+chromosome_segregation <- c("chromosome segregation",
+"mitotic sister chromatid segregation","sister chromatid segregation",
+"nuclear chromosome segregation")
+
+kinase_activity <- c("positive regulation of kinase activity",
+"positive regulation of transferase activity",
+"regulation of kinase activity",
+"positive regulation of protein kinase activity",
+"regulation of protein kinase activity")
+
+#Create object with cluster information
+genes.PC3negID.longer <- genes.PC3negID %>%
+  as.data.frame() %>%
+  tidyr::pivot_longer(everything(), names_to = "Description", values_to= "Genes") %>%
+  filter(Genes != "") %>%
+    mutate(Cluster= case_when(Description %in% blood_vessel_morphogenesis ~ "blood_vessel_morphogenesis",
+                              Description %in% DNA_pacckaging ~ "DNA_pacckaging",
+                              Description %in% chromosome_segregation ~ "chromosome_segregation",
+                               Description %in% kinase_activity ~ "kinase_activity")) %>%
+  tidyr::drop_na()
+
+#get gene symbols
+genes.PC3negID.longer$SYMBOL <-
+  entrz_name$SYMBOL[match(genes.PC3negID.longer$Genes,
+                                entrz_name$ENTREZID)]
+
+#Visualize expression of genes in cluster 1 (BLOODVMORPHO)
+VESSELMORPHO.genes<- genes.PC3negID.longer %>%
+  filter(Cluster == "blood_vessel_morphogenesis") %>%
+  as.data.frame() %>%
+  dplyr::select(SYMBOL) %>%
+  distinct()
+
+#Visualize expression of genes in cluster 1 (CELLADHESION)
+DNAPACK.genes<- genes.PC3negID.longer %>%
+  filter(Cluster == "DNA_pacckaging") %>%
+  as.data.frame() %>%
+  dplyr::select(SYMBOL) %>%
+  distinct()
+
+#Visualize expression of genes in cluster 1 (LIPID)
+CHROMOSSOMESEG.genes<- genes.PC3negID.longer %>%
+  filter(Cluster == "chromosome_segregation") %>%
+  as.data.frame() %>%
+  dplyr::select(SYMBOL) %>%
+  distinct()
+
+KINASE.genes<- genes.PC3negID.longer %>%
+  filter(Cluster == "kinase_activity") %>%
+  as.data.frame() %>%
+  dplyr::select(SYMBOL) %>%
+  distinct()
+```
+
+```{r fig.height=32, fig.width=12}
+# Subsetting
+VESSELMORPHO.genes_matrix<-PCA_norm.filt_zs %>%
+rownames_to_column(var="SYMBOL")%>%
+  arrange((SYMBOL))%>%
+  semi_join(VESSELMORPHO.genes, by= c("SYMBOL"= "SYMBOL"))%>%
+  column_to_rownames(var="SYMBOL")%>%
+  mutate(across(ends_with("CEL"),as.numeric)) %>%
+  as.matrix()
+#VESSELMORPHO.genes_matrix<-scale_rows(VESSELMORPHO.genes_matrix)
+###aplicar análise para definirkmeans do plot
+fviz_nbclust(VESSELMORPHO.genes_matrix, kmeans, method = "wss")+
+  geom_vline(xintercept = 2, linetype = 2)
+
+##heatmap
+col_fun  <- colorRamp2(c(-2, 0, 2), c("darkblue", "white", "indianred"))
+df_colnames <- as.data.frame((colnames(VESSELMORPHO.genes_matrix)))
+
+col_plasm<-colorRamp2(c(-2, 0, 2), plasma(3))
+
+haTerms_colnames <- HeatmapAnnotation(
+  df = df_colnames,
+  #col = col_fun,
+  Term = anno_text(
+    colnames(VESSELMORPHO.genes_matrix),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold')),
+  annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+  annotation_name_side = 'left')
+
+Term = anno_text(
+  colnames(VESSELMORPHO.genes_matrix),
+  rot = 45,
+  just = 'right',
+  gp = gpar(fontsize = 13, fontface = 'bold'))
+
+Heatmap(VESSELMORPHO.genes_matrix,
+                                      name = 'z-score',
+                                      rect_gp = gpar(col = 'whitesmoke'),
+                                      col = col_plasm,
+                                      cluster_rows = TRUE,
+                                      cluster_row_slices = FALSE,
+                                      show_row_dend = TRUE,
+                                      row_title = 'Gene Symbol',
+                                      row_title_side = 'left',
+                                      row_title_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_title_rot = 90,
+                                      show_row_names = TRUE,
+                                      #right_annotation = ha,
+                                      row_names_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_names_side = 'right',
+                                      row_dend_width = unit(35, 'mm'),
+
+                                      cluster_columns = TRUE,
+                                      show_column_dend = TRUE,
+                                      column_title = 'Blood vessel morphogenesis',
+                                      column_title_side = 'top',
+                                      column_title_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_title_rot = 0,
+                                      show_column_names = TRUE,
+                                      show_heatmap_legend = TRUE,
+                                      column_names_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_names_rot = 45,
+                                      row_km=2,
+                                      clustering_distance_columns = 'euclidean',
+                                      clustering_method_columns = 'ward.D2')
+
+```
+
+```{r fig.height=32, fig.width=12}
+# Subsetting
+DNAPACK.genes_matrix<-PCA_norm.filt_zs %>%
+rownames_to_column(var="SYMBOL")%>%
+  arrange((SYMBOL))%>%
+  semi_join(DNAPACK.genes, by= c("SYMBOL"= "SYMBOL"))%>%
+  column_to_rownames(var="SYMBOL")%>%
+  mutate(across(ends_with("CEL"),as.numeric)) %>%
+  as.matrix()
+#DNAPACK.genes_matrix<-scale_rows(DNAPACK.genes_matrix)
+###aplicar análise para definirkmeans do plot
+fviz_nbclust(DNAPACK.genes_matrix, kmeans, method = "wss")+
+  geom_vline(xintercept = 2, linetype = 2)
+
+##heatmap
+col_fun  <- colorRamp2(c(-2, 0, 2), c("darkblue", "white", "indianred"))
+df_colnames <- as.data.frame((colnames(DNAPACK.genes_matrix)))
+
+col_plasm<-colorRamp2(c(-2, 0, 2), plasma(3))
+
+haTerms_colnames <- HeatmapAnnotation(
+  df = df_colnames,
+  #col = col_fun,
+  Term = anno_text(
+    colnames(DNAPACK.genes_matrix),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold')),
+  annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+  annotation_name_side = 'left')
+
+Term = anno_text(
+  colnames(DNAPACK.genes_matrix),
+  rot = 45,
+  just = 'right',
+  gp = gpar(fontsize = 13, fontface = 'bold'))
+
+Heatmap(DNAPACK.genes_matrix,
+                                      name = 'z-score',
+                                      rect_gp = gpar(col = 'whitesmoke'),
+                                      col = col_plasm,
+                                      cluster_rows = TRUE,
+                                      cluster_row_slices = FALSE,
+                                      show_row_dend = TRUE,
+                                      row_title = 'Gene Symbol',
+                                      row_title_side = 'left',
+                                      row_title_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_title_rot = 90,
+                                      show_row_names = TRUE,
+                                      #right_annotation = ha,
+                                      row_names_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_names_side = 'right',
+                                      row_dend_width = unit(35, 'mm'),
+
+                                      cluster_columns = TRUE,
+                                      show_column_dend = TRUE,
+                                      column_title = 'DNA packaging',
+                                      column_title_side = 'top',
+                                      column_title_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_title_rot = 0,
+                                      show_column_names = TRUE,
+                                      show_heatmap_legend = TRUE,
+                                      column_names_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_names_rot = 45,
+                                      row_km=0,
+                                      clustering_distance_columns = 'euclidean',
+                                      clustering_method_columns = 'ward.D2')
+
+```
+
+```{r fig.height=32, fig.width=12}
+# Subsetting
+CHROMOSSOMESEG.genes_matrix<-PCA_norm.filt_zs %>%
+rownames_to_column(var="SYMBOL")%>%
+  arrange((SYMBOL))%>%
+  semi_join(CHROMOSSOMESEG.genes, by= c("SYMBOL"= "SYMBOL"))%>%
+  column_to_rownames(var="SYMBOL")%>%
+  mutate(across(ends_with("CEL"),as.numeric)) %>%
+  as.matrix()
+#CHROMOSSOMESEG.genes_matrix<-scale_rows(CHROMOSSOMESEG.genes_matrix)
+###aplicar análise para definirkmeans do plot
+fviz_nbclust(CHROMOSSOMESEG.genes_matrix, kmeans, method = "wss")+
+  geom_vline(xintercept = 2, linetype = 2)
+
+##heatmap
+col_fun  <- colorRamp2(c(-2, 0, 2), c("darkblue", "white", "indianred"))
+df_colnames <- as.data.frame((colnames(CHROMOSSOMESEG.genes_matrix)))
+
+col_plasm<-colorRamp2(c(-2, 0, 2), plasma(3))
+
+haTerms_colnames <- HeatmapAnnotation(
+  df = df_colnames,
+  #col = col_fun,
+  Term = anno_text(
+    colnames(CHROMOSSOMESEG.genes_matrix),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold')),
+  annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+  annotation_name_side = 'left')
+
+Term = anno_text(
+  colnames(CHROMOSSOMESEG.genes_matrix),
+  rot = 45,
+  just = 'right',
+  gp = gpar(fontsize = 13, fontface = 'bold'))
+
+Heatmap(CHROMOSSOMESEG.genes_matrix,
+                                      name = 'z-score',
+                                      rect_gp = gpar(col = 'whitesmoke'),
+                                      col = col_plasm,
+                                      cluster_rows = TRUE,
+                                      cluster_row_slices = FALSE,
+                                      show_row_dend = TRUE,
+                                      row_title = 'Gene Symbol',
+                                      row_title_side = 'left',
+                                      row_title_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_title_rot = 90,
+                                      show_row_names = TRUE,
+                                      #right_annotation = ha,
+                                      row_names_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_names_side = 'right',
+                                      row_dend_width = unit(35, 'mm'),
+
+                                      cluster_columns = TRUE,
+                                      show_column_dend = TRUE,
+                                      column_title = 'Chromossome Segregation',
+                                      column_title_side = 'top',
+                                      column_title_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_title_rot = 0,
+                                      show_column_names = TRUE,
+                                      show_heatmap_legend = TRUE,
+                                      column_names_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_names_rot = 45,
+                                      row_km=0,
+                                      clustering_distance_columns = 'euclidean',
+                                      clustering_method_columns = 'ward.D2')
+
+```
+
+```{r fig.height=32, fig.width=12}
+# Subsetting
+KINASE.genes_matrix<-PCA_norm.filt_zs %>%
+rownames_to_column(var="SYMBOL")%>%
+  arrange((SYMBOL))%>%
+  semi_join(KINASE.genes, by= c("SYMBOL"= "SYMBOL"))%>%
+  column_to_rownames(var="SYMBOL")%>%
+  mutate(across(ends_with("CEL"),as.numeric)) %>%
+  as.matrix()
+#KINASE.genes_matrix<-scale_rows(KINASE.genes_matrix)
+###aplicar análise para definirkmeans do plot
+fviz_nbclust(KINASE.genes_matrix, kmeans, method = "wss")+
+  geom_vline(xintercept = 2, linetype = 2)
+
+##heatmap
+col_fun  <- colorRamp2(c(-2, 0, 2), c("darkblue", "white", "indianred"))
+df_colnames <- as.data.frame((colnames(KINASE.genes_matrix)))
+
+col_plasm<-colorRamp2(c(-2, 0, 2), plasma(3))
+
+haTerms_colnames <- HeatmapAnnotation(
+  df = df_colnames,
+  #col = col_fun,
+  Term = anno_text(
+    colnames(KINASE.genes_matrix),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold')),
+  annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+  annotation_name_side = 'left')
+
+Term = anno_text(
+  colnames(KINASE.genes_matrix),
+  rot = 45,
+  just = 'right',
+  gp = gpar(fontsize = 13, fontface = 'bold'))
+
+Heatmap(KINASE.genes_matrix,
+                                      name = 'z-score',
+                                      rect_gp = gpar(col = 'whitesmoke'),
+                                      col = col_plasm,
+                                      cluster_rows = TRUE,
+                                      cluster_row_slices = FALSE,
+                                      show_row_dend = TRUE,
+                                      row_title = 'Gene Symbol',
+                                      row_title_side = 'left',
+                                      row_title_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_title_rot = 90,
+                                      show_row_names = TRUE,
+                                      #right_annotation = ha,
+                                      row_names_gp = gpar(fontsize = 11,
+                                                          fontface = 'bold',
+                                                          fontfamily = "serif"),
+                                      row_names_side = 'right',
+                                      row_dend_width = unit(35, 'mm'),
+
+                                      cluster_columns = TRUE,
+                                      show_column_dend = TRUE,
+                                      column_title = 'Positive regulation of kinase activity',
+                                      column_title_side = 'top',
+                                      column_title_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_title_rot = 0,
+                                      show_column_names = TRUE,
+                                      show_heatmap_legend = TRUE,
+                                      column_names_gp = gpar(fontsize = 11,
+                                                             fontface = 'bold',
+                                                             fontfamily = "serif"),
+                                      column_names_rot = 45,
+                                      row_km=2,
+                                      clustering_distance_columns = 'euclidean',
+                                      clustering_method_columns = 'ward.D2')
+
+```
+
+```{r fig.height=12, fig.width=10}
+PCA1_d1_GO <- pairwise_termsim(PC1_gseGO)
+treeplot(PCA1_d1_GO, hclust_method = "average",
+         showCategory = 20, split=F, hexpand = 0.15,
+         nCluster = 10)
+
+PCA1_d2_GO <- pairwise_termsim(PC2_gseGO)
+treeplot(PCA1_d2_GO, hclust_method = "average",
+         showCategory = 20, split=F, hexpand = 0.15,
+         nCluster = 10)
+
+PCA1_d3_GO <- pairwise_termsim(PC3_gseGO)
+treeplot(PCA1_d3_GO, hclust_method = "average",
+         showCategory = 20, split=F, hexpand = 0.15,
+         nCluster = 10)
+```
+
+#7.5 Dim top wanted genes heatmap
+For visualization purposes we used z-score (only used in heatmap, not for the next analysis)
+Dim1
+```{r fig.height=50, fig.width=12}
+number_of_genes <- c(50, 100, 500, 1000, 4000)
+
+#function to calculate z-score
+scale_rows <- function (x) {
+    m = apply(x, 1, mean, na.rm = T)
+    s = apply(x, 1, sd, na.rm = T)
+    return((x - m)/s)
+  }
+
+for (i in number_of_genes) {
+  var <- get_pca_var(PCA_expMat)
+  contribution_list<-var$contrib
+
+  Dim1<-contribution_list%>%
+     as.data.frame()%>%
+     dplyr::select(Dim.1)%>%
+    arrange(decreasing=T)%>%
+    rownames_to_column(var= "SYMBOL")%>%
+    top_n(i, Dim.1)%>%
+     dplyr::select(SYMBOL)
+
+  # Subsetting
+
+  genes_Dim1<-as.data.frame(PCA_norm.filt) %>%
+    rownames_to_column(var="SYMBOL") %>%
+    arrange((SYMBOL)) %>%
+    semi_join( Dim1, by= c("SYMBOL"= "SYMBOL")) %>%
+    column_to_rownames(var="SYMBOL") %>%
+    mutate(across(ends_with("CEL"),as.numeric)) %>%
+    as.matrix()
+  colnames(genes_Dim1) <- pheno$Conditions
+
+  genes_Dim1<-scale_rows(genes_Dim1)
+
+  ###aplicar análise para definirkmeans do plot
+  # fviz_nbclust(genes_Dim1, kmeans, method = "wss")+
+  #   geom_vline(xintercept = 2, linetype = 2)
+
+  ##heatmap
+  col_fun  <- colorRamp2(c(-2, 0, 2), c("darkblue", "white", "indianred"))
+  df_colnames <- as.data.frame((colnames(genes_Dim1)))
+
+  col_plasm<-colorRamp2(c(-2, 0, 2), plasma(3))
+
+  haTerms_colnames <- HeatmapAnnotation(
+    df = df_colnames,
+    #col = col_fun,
+    Term = anno_text(
+      colnames(genes_Dim1),
+      rot = 45,
+      just = 'right',
+      gp = gpar(fontsize = 13, fontface = 'bold')),
+    annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+    annotation_name_side = 'left')
+
+  Term = anno_text(
+    colnames(genes_Dim1),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold'))
+
+  ht<-Heatmap(genes_Dim1,
+              name = 'z-score',
+              rect_gp = gpar(col = 'whitesmoke'),
+              col = col_plasm,
+              cluster_rows = TRUE,
+              cluster_row_slices = FALSE,
+              show_row_dend = TRUE,
+              row_title = 'Gene Symbol',
+              row_title_side = 'left',
+              row_title_gp = gpar(fontsize = 11,
+                                  fontface = 'bold',
+                                  fontfamily = "serif"),
+              row_title_rot = 90,
+              show_row_names = TRUE,
+              #right_annotation = ha,
+              row_names_gp = gpar(fontsize = 11,
+                                  fontface = 'bold',
+                                  fontfamily = "serif"),
+              row_names_side = 'right',
+              row_dend_width = unit(35, 'mm'),
+
+              cluster_columns = TRUE,
+              show_column_dend = TRUE,
+              column_title = 'Dim1',
+              column_title_side = 'top',
+              column_title_gp = gpar(fontsize = 11,
+                                     fontface = 'bold',
+                                     fontfamily = "serif"),
+              column_title_rot = 0,
+              show_column_names = TRUE,
+              show_heatmap_legend = TRUE,
+              column_names_gp = gpar(fontsize = 11,
+                                     fontface = 'bold',
+                                     fontfamily = "serif"),
+              column_names_rot = 45,
+              row_km= 2,
+              clustering_distance_columns = 'euclidean',
+              clustering_method_columns = 'ward.D2')
+  png(paste0("images/heatmaps/ht_",i,"_genes.png"))
+  print(ht)
+  dev.off()
+  ht <- draw(ht)
+  nam1 <- paste("c1",i, sep = "_")
+  assign(nam1, t(t(row.names(genes_Dim1[row_order(ht)[[1]],]))))
+  nam2 <- paste("c2",i, sep = "_")
+  assign(nam2, t(t(row.names(genes_Dim1[row_order(ht)[[2]],]))))
+}
+
+```
+
+Dim2
+```{r fig.height=50, fig.width=12}
+number_of_genes <- c(50, 100, 500, 1000, 4000)
+
+for (i in number_of_genes) {
+  var <- get_pca_var(PCA_expMat)
+  contribution_list<-var$contrib
+
+  Dim2<-contribution_list%>%
+     as.data.frame()%>%
+     dplyr::select(Dim.2)%>%
+    arrange(decreasing=T)%>%
+    rownames_to_column(var= "SYMBOL")%>%
+    top_n(i, Dim.2)%>%
+     dplyr::select(SYMBOL)
+
+  # Subsetting
+
+  genes_Dim2<-as.data.frame(PCA_norm.filt) %>%
+    rownames_to_column(var="SYMBOL") %>%
+    arrange((SYMBOL)) %>%
+    semi_join( Dim2, by= c("SYMBOL"= "SYMBOL")) %>%
+    column_to_rownames(var="SYMBOL") %>%
+    mutate(across(ends_with("CEL"),as.numeric)) %>%
+    as.matrix()
+  colnames(genes_Dim2) <- pheno$Conditions
+  genes_Dim2<-scale_rows(genes_Dim2)
+
+  ###aplicar análise para definirkmeans do plot
+  # fviz_nbclust(genes_Dim2, kmeans, method = "wss")+
+  #   geom_vline(xintercept = 2, linetype = 2)
+
+  ##heatmap
+  col_fun  <- colorRamp2(c(-2, 0, 2), c("darkblue", "white", "indianred"))
+  df_colnames <- as.data.frame((colnames(genes_Dim2)))
+
+  col_plasm<-colorRamp2(c(-2, 0, 2), plasma(3))
+
+  haTerms_colnames <- HeatmapAnnotation(
+    df = df_colnames,
+    #col = col_fun,
+    Term = anno_text(
+      colnames(genes_Dim2),
+      rot = 45,
+      just = 'right',
+      gp = gpar(fontsize = 13, fontface = 'bold')),
+    annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+    annotation_name_side = 'left')
+
+  Term = anno_text(
+    colnames(genes_Dim2),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold'))
+
+  ht2<-Heatmap(genes_Dim2,
+              name = 'z-score',
+              rect_gp = gpar(col = 'whitesmoke'),
+              col = col_plasm,
+              cluster_rows = TRUE,
+              cluster_row_slices = FALSE,
+              show_row_dend = TRUE,
+              row_title = 'Gene Symbol',
+              row_title_side = 'left',
+              row_title_gp = gpar(fontsize = 11,
+                                  fontface = 'bold',
+                                  fontfamily = "serif"),
+              row_title_rot = 90,
+              show_row_names = TRUE,
+              #right_annotation = ha,
+              row_names_gp = gpar(fontsize = 11,
+                                  fontface = 'bold',
+                                  fontfamily = "serif"),
+              row_names_side = 'right',
+              row_dend_width = unit(35, 'mm'),
+
+              cluster_columns = TRUE,
+              show_column_dend = TRUE,
+              column_title = 'Dim2',
+              column_title_side = 'top',
+              column_title_gp = gpar(fontsize = 11,
+                                     fontface = 'bold',
+                                     fontfamily = "serif"),
+              column_title_rot = 0,
+              show_column_names = TRUE,
+              show_heatmap_legend = TRUE,
+              column_names_gp = gpar(fontsize = 11,
+                                     fontface = 'bold',
+                                     fontfamily = "serif"),
+              column_names_rot = 45,
+              row_km= 2,
+              clustering_distance_columns = 'euclidean',
+              clustering_method_columns = 'ward.D2')
+  png(paste0("images/heatmaps/ht2_",i,"_genes.png"))
+  print(ht2)
+  dev.off()
+  ht <- draw(ht2)
+  nam3 <- paste("c3",i, sep = "_")
+  assign(nam3, t(t(row.names(genes_Dim2[row_order(ht2)[[1]],]))))
+  nam4 <- paste("c4",i, sep = "_")
+  assign(nam4, t(t(row.names(genes_Dim2[row_order(ht2)[[2]],]))))
+}
+```
+Dim3
+```{r fig.height=50, fig.width=12}
+number_of_genes <- c(50, 100, 500, 1000, 3500)
+
+for (i in number_of_genes) {
+  var <- get_pca_var(PCA_expMat)
+  contribution_list<-var$contrib
+
+  Dim3<-contribution_list%>%
+     as.data.frame()%>%
+     dplyr::select(Dim.3)%>%
+    arrange(decreasing=T)%>%
+    rownames_to_column(var= "SYMBOL")%>%
+    top_n(i, Dim.3)%>%
+     dplyr::select(SYMBOL)
+
+  # Subsetting
+
+  genes_Dim3<-as.data.frame(PCA_norm.filt) %>%
+    rownames_to_column(var="SYMBOL") %>%
+    arrange((SYMBOL)) %>%
+    semi_join( Dim3, by= c("SYMBOL"= "SYMBOL")) %>%
+    column_to_rownames(var="SYMBOL") %>%
+    mutate(across(ends_with("CEL"),as.numeric)) %>%
+    as.matrix()
+
+  colnames(genes_Dim3) <- pheno$Conditions
+
+  genes_Dim3<-scale_rows(genes_Dim3)
+
+  ###aplicar análise para definirkmeans do plot
+  # fviz_nbclust(genes_Dim3, kmeans, method = "wss")+
+  #   geom_vline(xintercept = 2, linetype = 2)
+
+  ##heatmap
+  col_fun  <- colorRamp2(c(-2, 0, 2), c("darkblue", "white", "indianred"))
+  df_colnames <- as.data.frame((colnames(genes_Dim3)))
+
+  col_plasm<-colorRamp2(c(-2, 0, 2), plasma(3))
+
+  haTerms_colnames <- HeatmapAnnotation(
+    df = df_colnames,
+    #col = col_fun,
+    Term = anno_text(
+      colnames(genes_Dim3),
+      rot = 45,
+      just = 'right',
+      gp = gpar(fontsize = 13, fontface = 'bold')),
+    annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+    annotation_name_side = 'left')
+
+  Term = anno_text(
+    colnames(genes_Dim3),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold'))
+
+  ht3<-Heatmap(genes_Dim3,
+              name = 'z-score',
+              rect_gp = gpar(col = 'whitesmoke'),
+              col = col_plasm,
+              cluster_rows = TRUE,
+              cluster_row_slices = FALSE,
+              show_row_dend = TRUE,
+              row_title = 'Gene Symbol',
+              row_title_side = 'left',
+              row_title_gp = gpar(fontsize = 11,
+                                  fontface = 'bold',
+                                  fontfamily = "serif"),
+              row_title_rot = 90,
+              show_row_names = TRUE,
+              #right_annotation = ha,
+              row_names_gp = gpar(fontsize = 11,
+                                  fontface = 'bold',
+                                  fontfamily = "serif"),
+              row_names_side = 'right',
+              row_dend_width = unit(35, 'mm'),
+
+              cluster_columns = TRUE,
+              show_column_dend = TRUE,
+              column_title = 'Dim3',
+              column_title_side = 'top',
+              column_title_gp = gpar(fontsize = 11,
+                                     fontface = 'bold',
+                                     fontfamily = "serif"),
+              column_title_rot = 0,
+              show_column_names = TRUE,
+              show_heatmap_legend = TRUE,
+              column_names_gp = gpar(fontsize = 11,
+                                     fontface = 'bold',
+                                     fontfamily = "serif"),
+              column_names_rot = 45,
+              row_km= 2,
+              clustering_distance_columns = 'euclidean',
+              clustering_method_columns = 'ward.D2')
+  png(paste0("images/heatmaps/ht3_",i,"_genes.png"))
+  print(ht3)
+  dev.off()
+  ht <- draw(ht3)
+  nam5 <- paste("c5",i, sep = "_")
+  assign(nam5, t(t(row.names(genes_Dim3[row_order(ht3)[[1]],]))))
+  nam6 <- paste("c6",i, sep = "_")
+  assign(nam6, t(t(row.names(genes_Dim3[row_order(ht3)[[2]],]))))
+}
+```
+
+
+
+# Enrichment of the clusters
+
+```{r fig.height=15, fig.width=15}
+total.genes<-as.data.frame(PCA_norm.filt)%>%
+  rownames_to_column(var = "SYMBOL")%>%
+   dplyr::select(SYMBOL)
+
+c1 <- c(c1_50,c1_100,c1_500,c1_1000,c1_4000)
+c2 <- c(c2_50,c2_100,c2_500,c2_1000,c2_4000)
+c3 <- c(c3_50,c3_100,c3_500,c3_1000,c3_4000)
+c4 <- c(c4_50,c4_100,c4_500,c4_1000,c4_4000)
+c5 <- c(c5_50,c5_100,c5_500,c5_1000,c5_3500)
+c6 <- c(c6_50,c6_100,c6_500,c6_1000,c6_3500)
+
+for (i in 1:5) {
+  cluster1_Dim1<- c1[i]
+  cluster2_Dim1<- c2[i]
+
+  cluster1_Dim2<- c3[i]
+  cluster2_Dim2<- c4[i]
+
+  cluster1_Dim3<- c5[i]
+  cluster2_Dim3<- c6[i]
+  #Create dataframe for separated datasets
+
+  list.compare<- list(cluster1_Dim1,cluster2_Dim1,
+                      cluster1_Dim2,cluster2_Dim2,
+                      cluster1_Dim3,cluster2_Dim3)
+
+  names_List_genes <- c("Cluster1 from Dim1","Cluster2 from Dim1",
+                        "Cluster1 from Dim2","Cluster2 from Dim2",
+                        "Cluster1 from Dim3", "Cluster2 from Dim3")
+
+  names(list.compare) <- names_List_genes
+
+  clusters_genes_GO <- compareCluster(list.compare,
+                                universe= total.genes$SYMBOL,
+                                fun="enrichGO",
+                                ont = "BP",
+                                OrgDb = "org.Hs.eg.db",
+                                keyType= "SYMBOL",
+                                minGSSize= 10,
+                                pvalueCutoff = 0.05,
+                                pAdjustMethod = "none")
+
+  network.plot_clusters<- pairwise_termsim(clusters_genes_GO)
+
+  clusters_GO<-as.data.frame(network.plot_clusters)
+
+  cols.genesGO<-c('Cluster1 from Dim1' = "#583D72", 'Cluster2 from Dim1'= "#9F5F80",
+                  'Cluster1 from Dim2' = "#60d257", 'Cluster2 from Dim2'= "#b2f3ac",
+                  "Cluster1 from Dim3" = "#FF8474", "Cluster2 from Dim3"= "#FFC996")
+
+  #png(paste0('images/enrichplots/enrichplot_',i,'.png'), width = 720, height = 720, units = 'px')
+  plot(enrichplot::emapplot(network.plot_clusters,
+                       repel= T,
+                       showCategory = 30,
+                       fontsize= 20,
+                       label_style= "drl",
+                       clusterFunction = cluster::pam,
+                       nCluster=4)+
+         scale_fill_manual(values=cols.genesGO))
+  #dev.off()
+}
+
+```
+criar as tabelas das vias e genes
+```{r}
+cluster_GOgenes<- (clusters_GO)
+cluster_GOgenes_C1D1<-filter(cluster_GOgenes, Description %in% c("respiratory burst",
+                                                                  "cell chemotaxis",
+                                                                 "positive regulation of cell motility",
+                                                                 "positive regulation of locomotion",
+                                                                 "positive regulation of cell migration",
+                                                                 "positive regulation of cellular component movement",
+                                                                 "regulation of T cell apoptotic process",
+                                                                  "positive regulation of chemotaxis"))%>%
+                                dplyr::select(ID,Description,geneID,p.adjust, GeneRatio)
+write.csv(cluster_GOgenes_C1D1, "C1D1.csv")
+
+cluster_GOgenes_C1D3<-filter(cluster_GOgenes, Description %in% c("NADH dehydrogenase complex assembly",
+                                                                 "mitochondrial electron transport, NADH to ubiquinone",
+                                                                 "ATP synthesis coupled electron transport",
+                                                                 "mitochondrial respiratory chain complex assembly",
+                                                                 "aerobic electron transport chain",
+                                                                 "unsaturated fatty acid metabolic process",
+                                                                 "small molecule biosynthetic process",
+                                                                 "cholesterol biosynthetic process",
+                                                                 "sterol biosynthetic process",
+                                                                 "secondary alcohol biosynthetic process"))%>%
+   dplyr::select(ID,Description,geneID,p.adjust, GeneRatio)
+write.csv(cluster_GOgenes_C1D3, "C1D3.csv")
+
+cluster_GOgenes_C2D3<-filter(cluster_GOgenes, Description %in% c("fibrinolysis",
+                                                                 "negative regulation of blood coagulation",
+                                                                 "negative regulation of coagulation",
+                                                                 "regulation of hemostasis",
+                                                                 "cellular divalent inorganic cation homeostasis",
+                                                                 "calcium ion homeostasis",
+                                                                 "cellular calcium ion homeostasis",
+                                                                 "divalent inorganic cation homeostasis"))%>%
+   dplyr::select(ID,Description,geneID,p.adjust, GeneRatio)
+write.csv(cluster_GOgenes_C2D3, "C2D3.csv")
+```

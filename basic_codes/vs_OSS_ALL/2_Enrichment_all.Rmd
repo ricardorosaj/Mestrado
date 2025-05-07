@@ -1,0 +1,1070 @@
+---
+title: "all_heatmap"
+author: "Sarah Mattioli"
+date: "2023-03-30"
+output: html_document
+---
+```{r}
+library(pacman)
+p_load(here, dplyr, tidyr, tibble, topGO, org.Hs.eg.db, igraph, reshape2,
+       OmnipathR, remotes, readr, enrichR, ggwordcloud, textshape, tidytext, 
+       clusterProfiler, tidyverse, ComplexHeatmap, circlize, 
+       GeneSetCluster, wordcloud, tm)
+```
+
+```{r}
+# DEGs
+rm_OSS_DEGs <- read.csv("tables/rm_OSSvsOSS_ALL_72h_DEGs.csv")
+
+rm_OxPAPC_DEGs <- read.csv("tables/rm_OxPAPCvsOSS_ALL_72h_DEGs.csv")
+
+rm_CoCl2_DEGs <- read.csv("tables/rm_CoCl2vsOSS_ALL_72h_DEGs.csv")
+
+rm_IL1B_DEGs <- read.csv("tables/rm_IL1BvsOSS_ALL_72h_DEGs.csv")
+
+#LSS_48h_DEGs <- read.csv("tables/LSS_48hvsOSS_ALL_72h_DEGs.csv")
+
+# All genes
+rm_OSS_all <- read.csv("tables/rm_OSSvsOSS_ALL_72h_allgenes.csv")
+
+rm_OxPAPC_all <- read.csv("tables/rm_OxPAPCvsOSS_ALL_72h_allgenes.csv")
+
+rm_CoCl2_all <- read.csv("tables/rm_CoCl2vsOSS_ALL_72h_allgenes.csv")
+
+rm_IL1B_all <- read.csv("tables/rm_IL1BvsOSS_ALL_72h_allgenes.csv")
+
+#LSS_48h_all <- read.csv("tables/LSS_48hvsOSS_ALL_72h_allgenes.csv")
+```
+
+```{r}
+dbs <- listEnrichrDbs()
+dbs
+
+GO_2021 <- "GO_Biological_Process_2021"
+Msig_2020 <- "MSigDB_Hallmark_2020"
+BP_2019 <- "BioPlanet_2019"
+```
+
+```{r}
+# GO_Biological_Process_2021
+
+# rm OSS genes---------------------------------------------------------------
+GO_rm_OSS_DEGs <- enrichr(rm_OSS_DEGs$SYMBOL, GO_2021)
+GO_rm_OSS_DEGs_tab <- as.data.frame(GO_rm_OSS_DEGs$GO_Biological_Process_2021)
+Sig_GO_rm_OSS_DEGs_tab <- GO_rm_OSS_DEGs_tab %>% filter(Adjusted.P.value < 0.05)
+
+# rm_OxPAPC genes---------------------------------------------------------------
+GO_rm_OxPAPC_DEGs <- enrichr(rm_OxPAPC_DEGs$SYMBOL, GO_2021)
+GO_rm_OxPAPC_DEGs_tab <- as.data.frame(GO_rm_OxPAPC_DEGs$GO_Biological_Process_2021)
+Sig_GO_rm_OxPAPC_DEGs_tab <- GO_rm_OxPAPC_DEGs_tab %>% filter(Adjusted.P.value < 0.05)
+
+# rm_CoCl2 genes---------------------------------------------------------------
+GO_rm_CoCl2_DEGs <- enrichr(rm_CoCl2_DEGs$SYMBOL, GO_2021)
+GO_rm_CoCl2_DEGs_tab <- as.data.frame(GO_rm_CoCl2_DEGs$GO_Biological_Process_2021)
+Sig_GO_rm_CoCl2_DEGs_tab <- GO_rm_CoCl2_DEGs_tab %>% filter(Adjusted.P.value < 0.05)
+
+# rm_IL1B genes---------------------------------------------------------------
+GO_rm_IL1B_DEGs <- enrichr(rm_IL1B_DEGs$SYMBOL, GO_2021)
+GO_rm_IL1B_DEGs_tab <- as.data.frame(GO_rm_IL1B_DEGs$GO_Biological_Process_2021)
+Sig_GO_rm_IL1B_DEGs_tab <- GO_rm_IL1B_DEGs_tab %>% filter(Adjusted.P.value < 0.05)
+
+# # LSS_48h genes---------------------------------------------------------------
+# GO_LSS_48h_DEGs <- enrichr(LSS_48h_DEGs$SYMBOL, GO_2021)
+# GO_LSS_48h_DEGs_tab <- as.data.frame(GO_LSS_48h_DEGs$GO_Biological_Process_2021)
+# Sig_GO_LSS_48h_DEGs_tab <- GO_LSS_48h_DEGs_tab %>% filter(Adjusted.P.value < 0.05)
+
+# BioPlanet_2019
+
+# rm OSS genes---------------------------------------------------------------
+BP_rm_OSS_DEGs <- enrichr(rm_OSS_DEGs$SYMBOL, BP_2019)
+BP_rm_OSS_DEGs_tab <- as.data.frame(BP_rm_OSS_DEGs$BioPlanet_2019)
+Sig_BP_rm_OSS_DEGs_tab <- BP_rm_OSS_DEGs_tab %>% filter(Adjusted.P.value < 0.05)
+Sig_BP_rm_OSS_DEGs_tab$Term <- paste0(Sig_BP_rm_OSS_DEGs_tab$Term, " Bioplanet")
+
+# rm_OxPAPC genes---------------------------------------------------------------
+BP_rm_OxPAPC_DEGs <- enrichr(rm_OxPAPC_DEGs$SYMBOL, BP_2019)
+BP_rm_OxPAPC_DEGs_tab <- as.data.frame(BP_rm_OxPAPC_DEGs$BioPlanet_2019)
+Sig_BP_rm_OxPAPC_DEGs_tab <- BP_rm_OxPAPC_DEGs_tab %>% filter(Adjusted.P.value < 0.05)
+Sig_BP_rm_OxPAPC_DEGs_tab$Term <- paste0(Sig_BP_rm_OxPAPC_DEGs_tab$Term, " Bioplanet")
+
+# rm_CoCl2 genes---------------------------------------------------------------
+BP_rm_CoCl2_DEGs <- enrichr(rm_CoCl2_DEGs$SYMBOL, BP_2019)
+BP_rm_CoCl2_DEGs_tab <- as.data.frame(BP_rm_CoCl2_DEGs$BioPlanet_2019)
+Sig_BP_rm_CoCl2_DEGs_tab <- BP_rm_CoCl2_DEGs_tab %>% filter(Adjusted.P.value < 0.05)
+Sig_BP_rm_CoCl2_DEGs_tab$Term <- paste0(Sig_BP_rm_CoCl2_DEGs_tab$Term, " Bioplanet")
+
+# rm_IL1B genes---------------------------------------------------------------
+BP_rm_IL1B_DEGs <- enrichr(rm_IL1B_DEGs$SYMBOL, BP_2019)
+BP_rm_IL1B_DEGs_tab <- as.data.frame(BP_rm_IL1B_DEGs$BioPlanet_2019)
+Sig_BP_rm_IL1B_DEGs_tab <- BP_rm_IL1B_DEGs_tab %>% filter(Adjusted.P.value < 0.05)
+Sig_BP_rm_IL1B_DEGs_tab$Term <- paste0(Sig_BP_rm_IL1B_DEGs_tab$Term, " Bioplanet")
+
+# # LSS_48h genes---------------------------------------------------------------
+# BP_LSS_48h_DEGs <- enrichr(LSS_48h_DEGs$SYMBOL, BP_2019)
+# BP_LSS_48h_DEGs_tab <- as.data.frame(BP_LSS_48h_DEGs$BioPlanet_2019)
+# Sig_BP_LSS_48h_DEGs_tab <- BP_LSS_48h_DEGs_tab %>% filter(Adjusted.P.value < 0.05)
+# Sig_BP_LSS_48h_DEGs_tab$Term <- paste0(Sig_BP_LSS_48h_DEGs_tab$Term, " Bioplanet")
+
+# MSigDB_Hallmark_2020
+
+# rm OSS genes---------------------------------------------------------------
+Msig_rm_OSS_DEGs <- enrichr(rm_OSS_DEGs$SYMBOL, Msig_2020)
+Msig_rm_OSS_DEGs_tab <- as.data.frame(Msig_rm_OSS_DEGs$MSigDB_Hallmark_2020)
+Sig_Msig_rm_OSS_DEGs_tab <- Msig_rm_OSS_DEGs_tab %>% filter(Adjusted.P.value < 0.05)
+Sig_Msig_rm_OSS_DEGs_tab$Term <- paste0(Sig_Msig_rm_OSS_DEGs_tab$Term, " MsigDB")
+
+# rm_OxPAPC genes---------------------------------------------------------------
+Msig_rm_OxPAPC_DEGs <- enrichr(rm_OxPAPC_DEGs$SYMBOL, Msig_2020)
+Msig_rm_OxPAPC_DEGs_tab <- as.data.frame(Msig_rm_OxPAPC_DEGs$MSigDB_Hallmark_2020)
+Sig_Msig_rm_OxPAPC_DEGs_tab <- Msig_rm_OxPAPC_DEGs_tab %>% filter(Adjusted.P.value < 0.05)
+Sig_Msig_rm_OxPAPC_DEGs_tab$Term <- paste0(Sig_Msig_rm_OxPAPC_DEGs_tab$Term, " MsigDB")
+
+# rm_CoCl2 genes---------------------------------------------------------------
+Msig_rm_CoCl2_DEGs <- enrichr(rm_CoCl2_DEGs$SYMBOL, Msig_2020)
+Msig_rm_CoCl2_DEGs_tab <- as.data.frame(Msig_rm_CoCl2_DEGs$MSigDB_Hallmark_2020)
+Sig_Msig_rm_CoCl2_DEGs_tab <- Msig_rm_CoCl2_DEGs_tab %>% filter(Adjusted.P.value < 0.05)
+Sig_Msig_rm_CoCl2_DEGs_tab$Term <- paste0(Sig_Msig_rm_CoCl2_DEGs_tab$Term, " MsigDB")
+
+# rm_IL1B genes---------------------------------------------------------------
+Msig_rm_IL1B_DEGs <- enrichr(rm_IL1B_DEGs$SYMBOL, Msig_2020)
+Msig_rm_IL1B_DEGs_tab <- as.data.frame(Msig_rm_IL1B_DEGs$MSigDB_Hallmark_2020)
+Sig_Msig_rm_IL1B_DEGs_tab <- Msig_rm_IL1B_DEGs_tab %>% filter(Adjusted.P.value < 0.05)
+Sig_Msig_rm_IL1B_DEGs_tab$Term <- paste0(Sig_Msig_rm_IL1B_DEGs_tab$Term, " MsigDB")
+
+# # LSS_48h genes---------------------------------------------------------------
+# Msig_LSS_48h_DEGs <- enrichr(LSS_48h_DEGs$SYMBOL, Msig_2020)
+# Msig_LSS_48h_DEGs_tab <- as.data.frame(Msig_LSS_48h_DEGs$MSigDB_Hallmark_2020)
+# Sig_Msig_LSS_48h_DEGs_tab <- Msig_LSS_48h_DEGs_tab %>% filter(Adjusted.P.value < 0.05)
+# Sig_Msig_LSS_48h_DEGs_tab$Term <- paste0(Sig_Msig_LSS_48h_DEGs_tab$Term, " MsigDB")
+```
+
+```{r}
+# GO_Biological_Process_2021
+
+Sig_GO_rm_OSS_DEGs_tab <- Sig_GO_rm_OSS_DEGs_tab[,c(1,4,7:9)]
+top_25_GO_rm_OSS <- Sig_GO_rm_OSS_DEGs_tab[c(1:25),]
+
+Sig_GO_rm_OxPAPC_DEGs_tab <- Sig_GO_rm_OxPAPC_DEGs_tab[,c(1,4,7:9)]
+top_25_GO_rm_OxPAPC <- Sig_GO_rm_OxPAPC_DEGs_tab[c(1:25),]
+
+Sig_GO_rm_CoCl2_DEGs_tab <- Sig_GO_rm_CoCl2_DEGs_tab[,c(1,4,7:9)]
+top_25_GO_rm_CoCl2 <- Sig_GO_rm_CoCl2_DEGs_tab[c(1:25),]
+
+Sig_GO_rm_IL1B_DEGs_tab <- Sig_GO_rm_IL1B_DEGs_tab[,c(1,4,7:9)]
+top_25_GO_rm_IL1B <- Sig_GO_rm_IL1B_DEGs_tab[c(1:25),]
+
+# Sig_GO_LSS_48h_DEGs_tab <- Sig_GO_LSS_48h_DEGs_tab[,c(1,4,7:9)]
+# top_25_GO_LSS_48h <- Sig_GO_LSS_48h_DEGs_tab[c(1:25),]
+
+GO_BP <- rbind(top_25_GO_rm_OSS, top_25_GO_rm_OxPAPC, top_25_GO_rm_CoCl2, top_25_GO_rm_IL1B)#, top_25_GO_LSS_48h)
+#Merged_pathways_GO <- aggregate(Genes ~ Term, data = GO_BP, FUN = paste, collapse = ' ')
+
+# BioPlanet_2019
+
+Sig_BP_rm_OSS_DEGs_tab <- Sig_BP_rm_OSS_DEGs_tab[,c(1,4,7:9)]
+top_25_BP_rm_OSS <- Sig_BP_rm_OSS_DEGs_tab[c(1:25),]
+
+Sig_BP_rm_OxPAPC_DEGs_tab <- Sig_BP_rm_OxPAPC_DEGs_tab[,c(1,4,7:9)]
+top_25_BP_rm_OxPAPC <- Sig_BP_rm_OxPAPC_DEGs_tab[c(1:25),]
+
+Sig_BP_rm_CoCl2_DEGs_tab <- Sig_BP_rm_CoCl2_DEGs_tab[,c(1,4,7:9)]
+top_25_BP_rm_CoCl2 <- Sig_BP_rm_CoCl2_DEGs_tab[c(1:25),]
+
+Sig_BP_rm_IL1B_DEGs_tab <- Sig_BP_rm_IL1B_DEGs_tab[,c(1,4,7:9)]
+top_25_BP_rm_IL1B <- Sig_BP_rm_IL1B_DEGs_tab[c(1:25),]
+
+# Sig_BP_LSS_48h_DEGs_tab <- Sig_BP_LSS_48h_DEGs_tab[,c(1,4,7:9)]
+# top_25_BP_LSS_48h <- Sig_BP_LSS_48h_DEGs_tab[c(1:25),]
+
+BP <- rbind(top_25_BP_rm_OSS, top_25_BP_rm_OxPAPC, top_25_BP_rm_CoCl2, top_25_BP_rm_IL1B)#, top_25_BP_LSS_48h)
+#Merged_pathways_BP <- aggregate(Genes ~ Term, data = BP, FUN = paste, collapse = ' ')
+
+# MSigDB_Hallmark_2020
+
+Sig_Msig_rm_OSS_DEGs_tab <- Sig_Msig_rm_OSS_DEGs_tab[,c(1,4,7:9)]
+top_25_Msig_rm_OSS <- Sig_Msig_rm_OSS_DEGs_tab[c(1:25),]
+
+Sig_Msig_rm_OxPAPC_DEGs_tab <- Sig_Msig_rm_OxPAPC_DEGs_tab[,c(1,4,7:9)]
+top_25_Msig_rm_OxPAPC <- Sig_Msig_rm_OxPAPC_DEGs_tab[c(1:25),]
+
+Sig_Msig_rm_CoCl2_DEGs_tab <- Sig_Msig_rm_CoCl2_DEGs_tab[,c(1,4,7:9)]
+top_25_Msig_rm_CoCl2 <- Sig_Msig_rm_CoCl2_DEGs_tab[c(1:25),]
+
+Sig_Msig_rm_IL1B_DEGs_tab <- Sig_Msig_rm_IL1B_DEGs_tab[,c(1,4,7:9)]
+top_25_Msig_rm_IL1B <- Sig_Msig_rm_IL1B_DEGs_tab[c(1:25),]
+
+# Sig_Msig_LSS_48h_DEGs_tab <- Sig_Msig_LSS_48h_DEGs_tab[,c(1,4,7:9)]
+# top_25_Msig_LSS_48h <- Sig_Msig_LSS_48h_DEGs_tab[c(1:25),]
+
+MSig <- rbind(top_25_Msig_rm_OSS, top_25_Msig_rm_OxPAPC, top_25_Msig_rm_CoCl2, top_25_Msig_rm_IL1B)#, top_25_Msig_LSS_48h)
+
+all_bind <- rbind(GO_BP, BP, MSig)
+Merged_pathways_all <- aggregate(Genes ~ Term, data = all_bind, FUN = paste, collapse = ' ')
+```
+
+```{r}
+PathwayObject_all <- GeneSetCluster::ObjectCreator(Pathways = c(Merged_pathways_all$Term), 
+                               Molecules = c(Merged_pathways_all$Genes),
+                               Groups = c(rep("GO", times = nrow(Merged_pathways_all))),
+                               Source = "GO",
+                               Type = "GO_Pathways",#Optional
+                               structure = "SYMBOL",
+                               organism ="org.Hs.eg.db",
+                               sep = ";")
+
+##Manage Gene-Sets
+man.PathwayObject <- GeneSetCluster::ManageGeneSets(Object = PathwayObject_all,
+                                                    #keep.type =c("BP Pathways" ), 
+                                                    exclude.type="")
+
+
+ShowExperimentdata(Object = man.PathwayObject)
+ShowMeta(Object = man.PathwayObject)
+```
+
+```{r}
+##Distance calculations using user supplied combinations functions
+jaccard <- function(A,B)
+{
+  #The Jaccard similarity index compares members 
+  #for two sets to see which members are shared and which are distinct. 
+  #It's a measure of similarity for the two sets of data, with a range from 0% to 100%. 
+  #The higher the percentage, the more similar the two populations.
+  
+  M <- sum(as.vector(A) == 1 & as.vector(B) == 1)
+  A.c <- sum(as.vector(A) == 1 & as.vector(B) == 0)
+  B.c <- sum(as.vector(A) == 0 & as.vector(B) == 1)
+  J <- M/(A.c+B.c+M)
+  return(J)
+}
+
+man.PathwayObject.J <- CombineGeneSets(Object = man.PathwayObject, combineMethod = "Jaccard", combineMethod.supplied = jaccard)
+
+```
+
+```{r}
+##Optimal number of clusters
+OptimalGeneSets(object = man.PathwayObject.J, method = "silhouette", max_cluster= 24, cluster_method = "kmeans", main= "Kmeans for 24 clusters")
+OptimalGeneSets(object = man.PathwayObject.J, method = "gap", max_cluster= 24, cluster_method = "kmeans", main= "Kmeans for 24 clusters")
+OptimalGeneSets(object = man.PathwayObject.J, method = "elbow", max_cluster= 24, cluster_method = "kmeans", main= "Kmeans for 24 clusters")
+### cluster genes
+man.PathwayObject.J <- ClusterGeneSets(Object = man.PathwayObject.J, 
+                                       clusters = 9, 
+                                       method = "kmeans")
+
+PlotGeneSets(Object = man.PathwayObject.J, fontsize =5,
+             legend = T,
+             annotation.mol=F,
+             main="Jaccard distance", RR.max = 50)
+
+
+groups_path <- as.data.frame(man.PathwayObject.J@Data)
+groups_path$cluster_letters <- sapply(groups_path$cluster, function(i) letters[i])
+
+mat_PathwayObject.J<- as.matrix(man.PathwayObject.J@Data.RR)
+```
+
+```{r}
+##block as ploting regions 
+split <- as.character(groups_path$cluster_letters)
+align_to <- split(groups_path$Pathways, groups_path$cluster_letters)
+
+panel_fun = function(index, nm) {
+  grid.rect()
+  grid.text(paste0(length(index), "rows"))
+}
+
+# ht_score_1
+colnames(mat_PathwayObject.J) <- gsub("GO_","",colnames(mat_PathwayObject.J))
+rownames(mat_PathwayObject.J) <- gsub("GO_","",rownames(mat_PathwayObject.J))
+
+path_order <- rownames(mat_PathwayObject.J)
+mat_PathwayObject.J <- mat_PathwayObject.J[match(path_order, rownames(mat_PathwayObject.J)),]
+#####
+col_fun_path = colorRamp2(c(0, 1), c("white", "red"))
+cluster_annotation <- rowAnnotation(foo = anno_block(
+  align_to = align_to,
+  panel_fun = panel_fun))
+#split2 <- as.character(groups_path$Pathways)
+pathways_by_cluster <- split(groups_path$Pathways, groups_path$cluster_letters)
+```
+
+
+```{r fig.height=30, fig.width=30}
+ht_pathway_clustered_1_box_path <-Heatmap(mat_PathwayObject.J, 
+        col = col_fun_path,
+        cluster_rows = F, 
+        row_split = split,
+        column_title = 'Jaccard distance of pathways',
+        column_title_gp = gpar(fontsize = 14, fontface = 'bold'),
+        name = "h1",
+        row_dend_side = "right",
+        row_names_side = 'left',
+        show_row_dend = F,
+        width = unit(30, "cm"),
+        height = unit(60, "cm"),
+        border_gp = gpar(col = "gray"),
+        cluster_columns = F,
+        show_column_names = F,
+        show_row_names = F,
+        heatmap_legend_param = list(
+          title = "Jaccard distance",
+          legend_height = unit(4, "cm"),
+          title_position = "lefttop-rot"),
+        right_annotation = rowAnnotation(foo = anno_block(
+          align_to = align_to,
+          panel_fun = panel_fun,
+          labels = LETTERS[1:10]),textbox = anno_textbox(split, pathways_by_cluster)))
+ht_pathway_clustered_1_box_path
+        
+ht_pathway_clustered_1_row_path <-Heatmap(mat_PathwayObject.J, 
+                                          col = col_fun_path,
+                                          cluster_rows = F, 
+                                          row_split = split,
+                                          column_title = 'Jaccard distance of pathways',
+                                          column_title_gp = gpar(fontsize = 12, fontface = 'bold'),
+                                          name = "h1",
+                                          row_dend_side = "right",
+                                          row_names_side = 'left',
+                                          show_row_dend = F,
+                                          width = unit(30, "cm"),
+                                          height = unit(85, "cm"),
+                                          border_gp = gpar(col = "gray"),
+                                          cluster_columns = F,
+                                          show_column_names = F,
+                                          show_row_names = T,
+                                          heatmap_legend_param = list(
+                                            title = "Jaccard distance",
+                                            legend_height = unit(4, "cm"),
+                                            title_position = "lefttop-rot"),
+                                          right_annotation = cluster_annotation)
+ht_pathway_clustered_1_row_path
+
+```
+
+```{r}
+#####merge tables
+GO_full_1 <- full_join(Sig_GO_rm_OSS_DEGs_tab, Sig_GO_rm_IL1B_DEGs_tab, by = "Term")
+GO_full_2 <- full_join(Sig_GO_rm_OxPAPC_DEGs_tab, Sig_GO_rm_CoCl2_DEGs_tab, by = "Term")
+GO_full <- full_join(GO_full_1, GO_full_2, by = "Term")
+#GO_full <- full_join(GO_full_3, Sig_GO_LSS_48h_DEGs_tab, by = "Term")
+
+BP_full_1 <- full_join(Sig_BP_rm_OSS_DEGs_tab,Sig_BP_rm_IL1B_DEGs_tab, by = "Term")
+BP_full_2 <- full_join(Sig_BP_rm_OxPAPC_DEGs_tab, Sig_BP_rm_CoCl2_DEGs_tab, by = "Term")
+BP_full <- full_join(BP_full_1, BP_full_2, by = "Term")
+#BP_full <- full_join(BP_full_3, Sig_BP_LSS_48h_DEGs_tab, by = "Term")
+
+Msig_full_1 <- full_join(Sig_Msig_rm_OSS_DEGs_tab,Sig_Msig_rm_IL1B_DEGs_tab, by = "Term")
+Msig_full_2 <- full_join(Sig_Msig_rm_OxPAPC_DEGs_tab, Sig_Msig_rm_CoCl2_DEGs_tab, by = "Term")
+Msig_full <- full_join(Msig_full_1, Msig_full_2, by = "Term")
+#Msig_full <- full_join(Msig_full_3, Sig_Msig_LSS_48h_DEGs_tab, by = "Term")
+
+all_full <- rbind(GO_full, BP_full, Msig_full)
+
+#setdiff(Merged_pathways_all$Term, all_CM$Term)
+
+all_CM <- inner_join(all_full, Merged_pathways_all, by = "Term")
+all_CM <- all_CM[,c(1:4,6:8,10:12,14:16)]#,18:20)]
+
+
+all_CM <- all_CM %>% 
+            dplyr::rename(Adjusted.P.value.rm_OSS = Adjusted.P.value.x.x,
+                          Odds.Ratio.rm_OSS = Odds.Ratio.x.x,
+                          Combined.Score.rm_OSS = Combined.Score.x.x,
+                          Adjusted.P.value.rm_IL1B = Adjusted.P.value.y.x,
+                          Odds.Ratio.rm_IL1B = Odds.Ratio.y.x,
+                          Combined.Score.rm_IL1B = Combined.Score.y.x,
+                          Adjusted.P.value.rm_OxPAPC = Adjusted.P.value.x.y,
+                          Odds.Ratio.rm_OxPAPC = Odds.Ratio.x.y,
+                          Combined.Score.rm_OxPAPC = Combined.Score.x.y,
+                          Adjusted.P.value.rm_CoCl2 = Adjusted.P.value.y.y,
+                          Odds.Ratio.rm_CoCl2 = Odds.Ratio.y.y,
+                          Combined.Score.rm_CoCl2 = Combined.Score.y.y)#,
+                          #Adjusted.P.value.LSS_48h = Adjusted.P.value),
+                          #Odds.Ratio.LSS_48h = Odds.Ratio,
+                          #Combined.Score.LSS_48h = Combined.Score)
+
+all_CM <- all_CM %>% 
+  mutate(rm_OSS = -log10((Adjusted.P.value.rm_OSS)),
+         rm_OxPAPC = -log10((Adjusted.P.value.rm_OxPAPC)),
+         rm_CoCl2 = -log10((Adjusted.P.value.rm_CoCl2)),
+         rm_IL1B = -log10((Adjusted.P.value.rm_IL1B)),
+         #LSS_48h = -log10((Adjusted.P.value.LSS_48h)),
+         OR_OSS = log10((Odds.Ratio.rm_OSS)),
+         OR_rm_OxPAPC = log10((Odds.Ratio.rm_OxPAPC)),
+         OR_rm_CoCl2 = log10((Odds.Ratio.rm_CoCl2)),
+         OR_rm_IL1B = log10((Odds.Ratio.rm_IL1B)))#,
+         #OR_LSS_48h = log10((Odds.Ratio.LSS_48h)))
+
+######
+names_CM <- all_CM$Term
+all_CM[c(1)]<- NULL
+all_CM[is.na(all_CM)] = 0
+
+mat_all_CM <- mapply(all_CM, FUN = as.numeric)
+rownames(mat_all_CM) <- names_CM
+
+##Subset conditions
+ht_score <- mat_all_CM[,c(13:16)]
+ht_score <- ht_score[match(path_order, rownames(ht_score)),]
+ht_score <- ht_score[rowSums(is.na(ht_score)) != ncol(ht_score), ]
+
+ht_OR <- mat_all_CM[,c(17:20)]
+ht_OR <- ht_OR[match(path_order, rownames(ht_OR)),]
+ht_OR <- ht_OR[rowSums(is.na(ht_OR)) != ncol(ht_OR), ]
+
+#create legends annotation
+col_ht_score  <- colorRamp2(c(10, 0), c("darkorange2", "whitesmoke"))
+col_ht_OR  <- colorRamp2(c(0, 2), c("whitesmoke", "darkred"))
+
+lgd_ht_score = Legend(col_fun = col_ht_score, title = "-Log10(adjusted.pvlaue)")
+lgd_ht_OR = Legend(col_fun = col_ht_OR, title = "Log10(Odds Ratio)")
+
+
+df_colnames_score <- as.data.frame((colnames(ht_score)))
+colnames(df_colnames_score)[1]<- "-log10(adjusted.pvlaue)"
+# ht_score_1
+
+ht_score_1 <- Heatmap(ht_score,
+                      #name = 'Log2FC',
+                      rect_gp = gpar(col = 'gray66'),
+                      col = col_ht_score,
+                      name = "h2",
+                      cluster_rows = FALSE,
+                      cluster_row_slices = TRUE,
+                      show_row_dend = FALSE,
+                      #row_title = 'all pathways',
+                      row_title_side = 'left',
+                      row_title_gp = gpar(fontsize = 11, fontface = 'bold'),
+                      row_title_rot = 90,
+                      show_row_names = TRUE,
+                      #right_annotation = ha,
+                      row_names_gp = gpar(fontsize = 12, fontface = 'bold'),
+                      row_names_side = 'left',
+                      row_dend_width = unit(35, 'cm'),
+                      width = unit(5, "cm"),
+                      height = unit(70, "cm"),
+                      
+                      cluster_columns = FALSE,
+                      show_column_dend = TRUE,
+                      column_title = 'Adjusted pvalue',
+                      column_title_side = 'top',
+                      column_title_gp = gpar(fontsize = 14, fontface = 'bold'),
+                      column_title_rot = 0,
+                      show_column_names = TRUE,
+                      show_heatmap_legend = TRUE,
+                      column_names_gp = gpar(fontsize = 14, fontface = 'bold'),
+                      column_names_rot = 45,
+                      heatmap_legend_param = list(
+                        title = "-log10(adjusted.pvlaue)",
+                        legend_height = unit(4, "cm"),
+                        title_position = "lefttop-rot"
+                      ),
+                      clustering_distance_columns = 'euclidean',
+                      clustering_method_columns = 'ward.D2',
+                      clustering_distance_rows = 'euclidean',
+                      clustering_method_rows = 'ward.D2')#,
+
+ht_score_1
+
+# ht_OR_1
+
+ht_OR_1 <- Heatmap(ht_OR,
+                   #name = 'Log2FC',
+                   rect_gp = gpar(col = 'gray66'),
+                   col = col_ht_OR,
+                   name = "h3",
+                   cluster_rows = FALSE,
+                   cluster_row_slices = FALSE,
+                   show_row_dend = FALSE,
+                   #row_title = 'all pathways',
+                   row_title_side = 'left',
+                   row_title_gp = gpar(fontsize = 11, fontface = 'bold'),
+                   row_title_rot = 90,
+                   show_row_names = TRUE,
+                   #right_annotation = ha,
+                   row_names_gp = gpar(fontsize = 12, fontface = 'bold'),
+                   row_names_side = 'left',
+                   row_dend_width = unit(35, 'cm'),
+                   width = unit(5, "cm"),
+                   height = unit(70, "cm"),
+                   
+                   cluster_columns = FALSE,
+                   show_column_dend = TRUE,
+                   column_title = 'Odds Ratio',
+                   column_title_side = 'top',
+                   column_title_gp = gpar(fontsize = 14, fontface = 'bold'),
+                   column_title_rot = 0,
+                   show_column_names = TRUE,
+                   show_heatmap_legend = TRUE,
+                   column_names_gp = gpar(fontsize = 14, fontface = 'bold'),
+                   column_names_rot = 45,
+                   heatmap_legend_param = list(
+                     title = "Odds Ratio",
+                     legend_height = unit(4, "cm"),
+                     title_position = "lefttop-rot"
+                   ),
+                   
+                   
+                   clustering_distance_columns = 'euclidean',
+                   clustering_method_columns = 'ward.D2',
+                   clustering_distance_rows = 'euclidean',
+                   clustering_method_rows = 'ward.D2')#,
+
+ht_OR_1
+
+### 1
+# ht_list = ht_pathway_clustered_1_box_path+ht_score_1+ ht_OR_1 
+# 
+# tiff("Enrichment/JACCARD_with_LSS48h.tif",width = 30, height = 60, units = 'in', res=200)
+# draw(ht_list, main_heatmap = "h1", 
+# ht_gap = unit(5, "mm"), row_gap = unit(5, "mm"))
+# dev.off()
+##2
+ht_list2 = ht_score_1 + ht_OR_1 + ht_pathway_clustered_1_row_path
+
+tiff("images/Dissertação/TIFF/JACCARD_heatmap.tif",width = 30, height = 40, units = 'in', res=600)
+draw(ht_list2, main_heatmap = "h1", 
+     ht_gap = unit(5, "mm"), row_gap = unit(5, "mm"))
+dev.off()
+
+draw(ht_score_1, main_heatmap = "h1", 
+     ht_gap = unit(5, "mm"), row_gap = unit(5, "mm"))
+
+# png("Enrichment/JACCARD_heatmap2_with_LSS48h.png",width = 30, height = 40, units = 'in', res=200)
+# draw(ht_list2, main_heatmap = "h1", 
+#      ht_gap = unit(5, "mm"), row_gap = unit(5, "mm"))
+# dev.off()
+```
+
+## Dotplot of enrcihment
+
+```{r fig.height=30, fig.width=12}
+dotplot_values <- data.frame(cbind(ht_score,ht_OR))
+list_scores <- c(dotplot_values$rm_OSS, dotplot_values$rm_OxPAPC, dotplot_values$rm_CoCl2, dotplot_values$rm_IL1B)
+list_or <- c(dotplot_values$OR_OSS, dotplot_values$OR_rm_OxPAPC, dotplot_values$OR_rm_CoCl2, dotplot_values$OR_rm_IL1B)
+
+dotplot_df <- data.frame(Terms = rep(rownames(dotplot_values),4), 
+                         Comparisons = rep(c("rm OSS vs OSS+ALL","rm OxPAPC vs OSS+ALL","rm CoCl2 vs OSS+ALL","rm IL1B vs OSS+ALL"), 4,each = length(rownames(dotplot_values))),
+                         Score = list_scores,
+                         Odds.Ratio = list_or)
+
+for (cluster in names(pathways_by_cluster)) {
+  terms_in_cluster <- pathways_by_cluster[[cluster]]
+  dotplot_df$Cluster[dotplot_df$Term %in% terms_in_cluster] <- cluster
+}
+
+dotplot <- dotplot_df %>% ggplot(aes(x=Comparisons, y = Terms, color = Score, size = Odds.Ratio)) + 
+  geom_point()  + 
+  guides(size = guide_legend(title = "Odds.Ratio"))+
+  theme(strip.text.y = element_text(angle = 0))+
+  theme(axis.line  = element_blank()) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  ylab('') +
+  theme(axis.ticks = element_blank(), legend.position = "bottom") +
+  facet_grid(Cluster ~ ., scales = "free", space = "free")+
+  scale_color_gradientn(colours = viridis::viridis(20), limits = c(0,23), oob = scales::squish, name = '-log10(Adjusted.P.value)')
+dotplot
+
+tiff("images/Dissertação/TIFF/Jaccard_dotplot.tiff",width = 8, height = 30, units = 'in', res=600)
+dotplot 
+dev.off()
+```
+
+## Plot heatmaps for clusters
+
+```{r}
+# Select from "groups_path" the pathways from each cluster wanted and plot their heatmap
+plot_heatmap_for_selected_clusters <- function(cluster,cluster_name,bool_iguara){
+  TFs_list <- read.table(file = 'tables/TFs/trrust_rawdata.human.tsv', sep = '\t', header = FALSE)
+  TFs_list <- unique(TFs_list$V1)
+
+  selected_clusters <- groups_path[groups_path$cluster == cluster, c("Pathways","Molecules")]
+  genes <- unique(unlist(as.list(strsplit(selected_clusters$Molecules,"\\; |\\;| "))))
+  ngenes <- length(genes)
+  genes_exp <- as.data.frame(matrix(0,nrow = ngenes, ncol = 4, dimnames = list(genes,c("rm OSS vs OSS+ALL","rm OxPAPC vs OSS+ALL","rm CoCl2 vs OSS+ALL","rm IL1B vs OSS+ALL"))))#,"LSS 48h"))))
+  rm_oss <- rm_OSS_all[rm_OSS_all$SYMBOL %in% genes,c("SYMBOL","logFC")]
+  rm_cocl2 <- rm_CoCl2_all[rm_CoCl2_all$SYMBOL %in% genes,c("SYMBOL","logFC")]
+  rm_oxpapc <- rm_OxPAPC_all[rm_OxPAPC_all$SYMBOL %in% genes,c("SYMBOL","logFC")]
+  rm_il1b <- rm_IL1B_all[rm_IL1B_all$SYMBOL %in% genes,c("SYMBOL","logFC")]
+  #lss_48h <- LSS_48h_all[LSS_48h_all$SYMBOL %in% genes,c("SYMBOL","logFC")]
+  
+  if(bool_iguara == TRUE){
+    oss_all_iguara <- OSSALL_iguaracy_ALL[OSSALL_iguaracy_ALL$SYMBOL %in% genes,c("SYMBOL","logFC")]
+    genes_exp[,"OSS+ALL Iguaracy"] <- oss_all_iguara[match(rownames(genes_exp),oss_all_iguara$SYMBOL),"logFC"]
+  }
+  
+  genes_exp[,"rm OSS vs OSS+ALL"] <- rm_oss[match(rownames(genes_exp),rm_oss$SYMBOL),"logFC"]
+  genes_exp[,"rm OxPAPC vs OSS+ALL"] <- rm_oxpapc[match(rownames(genes_exp),rm_oxpapc$SYMBOL),"logFC"]
+  genes_exp[,"rm CoCl2 vs OSS+ALL"] <- rm_cocl2[match(rownames(genes_exp),rm_cocl2$SYMBOL),"logFC"]
+  genes_exp[,"rm IL1B vs OSS+ALL"] <- rm_il1b[match(rownames(genes_exp),rm_il1b$SYMBOL),"logFC"]
+  #genes_exp[,"LSS 48h"] <- lss_48h[match(rownames(genes_exp),lss_48h$SYMBOL),"logFC"]
+  
+  for (i in 1:dim(genes_exp)[1]) {
+    if (rownames(genes_exp)[i] %in% TFs_list) {
+      rownames(genes_exp)[i] <- paste0(rownames(genes_exp)[i],'*')
+    }
+  }
+  
+  genes_exp <- as.matrix(genes_exp)
+  
+  col_fun  <- colorRamp2(c(-8, 0, 8), c("blue", "white", "red"))
+  
+  df_colnames <- as.data.frame((colnames(genes_exp)))
+  colnames(df_colnames)[1]<- "Comparissons"
+  
+  ##prepare heatmap plots
+  ##add colnames
+  haTerms_colnames <- HeatmapAnnotation(
+    df = df_colnames,
+    #col = col_fun,
+    Term = anno_text(
+      colnames(genes_exp),
+      rot = 45,
+      just = 'right',
+      gp = gpar(fontsize = 13, fontface = 'bold')),
+    annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+    annotation_name_side = 'left')
+  ##change legend sizes
+  Term = anno_text(
+    colnames(genes_exp),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold'))
+  
+  heat_mat_plot <- Heatmap(genes_exp,
+                           name = 'logFC',
+                           col = col_fun,
+                           cluster_rows = T,
+                           cluster_row_slices = F,
+                           show_row_dend = T,
+                           row_title = "Genes",
+                           row_title_side = 'left',
+                           row_title_gp = gpar(fontsize = 11, fontface = 'bold'),
+                           row_title_rot = 90,
+                           show_row_names = T,
+                           row_names_gp = gpar(fontsize = 11, fontface = 'bold'),
+                           row_names_side = 'left',
+                           row_dend_width = unit(20, 'mm'),
+                           cell_fun = function(j, i, x, y, width, height, fill) {
+                              grid.text(sprintf("%.1f", genes_exp[i, j]), x, y, gp = gpar(fontsize = 10))},
+                           cluster_columns = F,
+                           show_column_dend = FALSE,
+                           column_title = cluster_name,
+                           column_title_side = 'top',
+                           #column_names_side = "top",
+                           column_title_gp = gpar(fontsize = 13, fontface = 'bold'),
+                           column_title_rot = 0,
+                           show_column_names = TRUE,
+                           show_heatmap_legend = TRUE,
+                           column_names_gp = gpar(fontsize = 8, fontface = 'bold'),
+                           column_names_rot = 45,##change the angle of column name
+                           
+                           clustering_distance_rows = 'euclidean',
+                           clustering_method_rows = 'ward.D2',
+                           rect_gp = gpar(col = "black", lwd = 0.5),)#,
+  
+  heat_mat_plot
+}
+```
+
+```{r}
+# Plot pathways in clusters
+plot_heatmap_for_selected_pathways <- function(cluster,pathway,bool_iguara){
+  TFs_list <- read.table(file = 'tables/TFs/trrust_rawdata.human.tsv', sep = '\t', header = FALSE)
+  TFs_list <- unique(TFs_list$V1)
+  
+  selected_clusters <- groups_path[groups_path$cluster == cluster, c("Pathways","Molecules")]
+  selected_pathway <- selected_clusters[selected_clusters$Pathways == pathway,]
+  genes <- unique(unlist(as.list(strsplit(selected_pathway$Molecules,"\\; |\\;| "))))
+  ngenes <- length(genes)
+  genes_exp <- as.data.frame(matrix(0,nrow = ngenes, ncol = 4, dimnames = list(genes,c("rm OSS vs OSS+ALL","rm OxPAPC vs OSS+ALL","rm CoCl2 vs OSS+ALL","rm IL1B vs OSS+ALL"))))#,"LSS 48h"))))
+  rm_oss <- rm_OSS_all[rm_OSS_all$SYMBOL %in% genes,c("SYMBOL","logFC")]
+  rm_cocl2 <- rm_CoCl2_all[rm_CoCl2_all$SYMBOL %in% genes,c("SYMBOL","logFC")]
+  rm_oxpapc <- rm_OxPAPC_all[rm_OxPAPC_all$SYMBOL %in% genes,c("SYMBOL","logFC")]
+  rm_il1b <- rm_IL1B_all[rm_IL1B_all$SYMBOL %in% genes,c("SYMBOL","logFC")]
+  #lss_48h <- LSS_48h_all[LSS_48h_all$SYMBOL %in% genes,c("SYMBOL","logFC")]
+  
+  if(bool_iguara == TRUE){
+    oss_all_iguara <- OSSALL_iguaracy_ALL[OSSALL_iguaracy_ALL$SYMBOL %in% genes,c("SYMBOL","logFC")]
+    genes_exp[,"OSS+ALL Iguaracy"] <- oss_all_iguara[match(rownames(genes_exp),oss_all_iguara$SYMBOL),"logFC"]
+  }
+  
+  genes_exp[,"rm OSS vs OSS+ALL"] <- rm_oss[match(rownames(genes_exp),rm_oss$SYMBOL),"logFC"]
+  genes_exp[,"rm OxPAPC vs OSS+ALL"] <- rm_oxpapc[match(rownames(genes_exp),rm_oxpapc$SYMBOL),"logFC"]
+  genes_exp[,"rm CoCl2 vs OSS+ALL"] <- rm_cocl2[match(rownames(genes_exp),rm_cocl2$SYMBOL),"logFC"]
+  genes_exp[,"rm IL1B vs OSS+ALL"] <- rm_il1b[match(rownames(genes_exp),rm_il1b$SYMBOL),"logFC"]
+  #genes_exp[,"LSS 48h"] <- lss_48h[match(rownames(genes_exp),lss_48h$SYMBOL),"logFC"]
+  
+  for (i in 1:dim(genes_exp)[1]) {
+    if (rownames(genes_exp)[i] %in% TFs_list) {
+      rownames(genes_exp)[i] <- paste0(rownames(genes_exp)[i],'*')
+    }
+  }
+  
+  genes_exp <- as.matrix(genes_exp)
+
+  col_fun  <- colorRamp2(c(-8, 0, 8), c("blue", "white", "red"))
+  
+  df_colnames <- as.data.frame((colnames(genes_exp)))
+  colnames(df_colnames)[1]<- "Comparissons"
+  
+  ##prepare heatmap plots
+  ##add colnames
+  haTerms_colnames <- HeatmapAnnotation(
+    df = df_colnames,
+    #col = col_fun,
+    Term = anno_text(
+      colnames(genes_exp),
+      rot = 45,
+      just = 'right',
+      gp = gpar(fontsize = 13, fontface = 'bold')),
+    annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+    annotation_name_side = 'left')
+  ##change legend sizes
+  Term = anno_text(
+    colnames(genes_exp),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold'))
+  
+  heat_mat_plot <- Heatmap(genes_exp,
+                           name = 'logFC',
+                           col = col_fun,
+                           cluster_rows = T,
+                           cluster_row_slices = F,
+                           show_row_dend = T,
+                           row_title = "Genes",
+                           row_title_side = 'left',
+                           row_title_gp = gpar(fontsize = 11, fontface = 'bold'),
+                           row_title_rot = 90,
+                           show_row_names = T,
+                           row_names_gp = gpar(fontsize = 11, fontface = 'bold'),
+                           row_names_side = 'left',
+                           row_dend_width = unit(20, 'mm'),
+                           cell_fun = function(j, i, x, y, width, height, fill) {
+                              grid.text(sprintf("%.1f", genes_exp[i, j]), x, y, gp = gpar(fontsize = 10))},
+                           cluster_columns = F,
+                           show_column_dend = FALSE,
+                           column_title = pathway,
+                           column_title_side = 'top',
+                           #column_names_side = "top",
+                           column_title_gp = gpar(fontsize = 13, fontface = 'bold'),
+                           column_title_rot = 0,
+                           show_column_names = TRUE,
+                           show_heatmap_legend = TRUE,
+                           column_names_gp = gpar(fontsize = 8, fontface = 'bold'),
+                           column_names_rot = 45,##change the angle of column name
+                           
+                           clustering_distance_rows = 'euclidean',
+                           clustering_method_rows = 'ward.D2',
+                           rect_gp = gpar(col = "black", lwd = 0.5),)#,
+  
+  heat_mat_plot
+}
+
+```
+
+```{r fig.height=10, fig.width=5}
+tiff("images/Dissertação/TIFF/heatmaps_atualizados/HT_cholesterol.tif", units="in", width=5, height=10, res=600)
+plot_heatmap_for_selected_clusters(2,"Cluster b - Cholesterol biosynthesis",FALSE)
+dev.off()
+
+tiff("images/Dissertação/TIFF/heatmaps_atualizados/HT_chemotaxis.tif", units="in", width=5, height=10, res=600)
+plot_heatmap_for_selected_clusters(3,"Cluster c - Chemotaxis",FALSE)
+dev.off()
+
+tiff("images/Dissertação/TIFF/heatmaps_atualizados/HT_mitosis_1.tif", units="in", width=5, height=12, res=600)
+plot_heatmap_for_selected_clusters(4,"Cluster d - Mitosis",FALSE)
+dev.off()
+
+tiff("images/Dissertação/TIFF/heatmaps_atualizados/HT_mitosis_2.tif", units="in", width=5, height=12, res=600)
+plot_heatmap_for_selected_clusters(5,"Cluster e - Mitosis",FALSE)
+dev.off()
+
+tiff("images/Dissertação/TIFF/heatmaps_atualizados/HT_ecm.tif", units="in", width=5, height=12, res=600)
+plot_heatmap_for_selected_clusters(6,"Cluster f - ECM organization",FALSE)
+dev.off()
+
+tiff("images/Dissertação/TIFF/heatmaps_atualizados/HT_cell_nmigration.tif", units="in", width=5, height=12, res=600)
+plot_heatmap_for_selected_clusters(7,"Cluster g - Cell migration",FALSE)
+dev.off()
+
+tiff("images/Dissertação/TIFF/heatmaps_atualizados/HT_inflammatory_response.tif", units="in", width=5, height=12, res=600)
+plot_heatmap_for_selected_clusters(9,"Cluster i - Inflammatory Response",FALSE)
+dev.off()
+
+# #If too many genes in heatmap, plot each enriched term
+# selected_clusters_inflammation <- groups_path[groups_path$cluster == 2, c("Pathways","Molecules")]
+# selected_clusters_angio <- groups_path[groups_path$cluster == 7, c("Pathways","Molecules")]
+# 
+# plot_heatmap_for_selected_pathways(2,"TNF-alpha Signaling via NF-kB MsigDB",TRUE)
+
+
+```
+
+```{r}
+# # Plot pathways in clusters
+plot_heatmap_for_multiple_pathways <- function(cluster,pathways,title,bool_iguara){
+  TFs_list <- read.table(file = 'tables/TFs/trrust_rawdata.human.tsv', sep = '\t', header = FALSE)
+  TFs_list <- unique(TFs_list$V1)
+
+  selected_clusters <- groups_path[groups_path$cluster == cluster, c("Pathways","Molecules")]
+  selected_pathway <- selected_clusters[selected_clusters$Pathways %in% pathways,]
+  genes <- unique(unlist(as.list(strsplit(selected_pathway$Molecules,"\\; |\\;| "))))
+  ngenes <- length(genes)
+  genes_exp <- as.data.frame(matrix(0,nrow = ngenes, ncol = 4, dimnames = list(genes,c("rm OSS","rm OxPAPC","rm CoCl2","rm IL1B"))))
+  rm_oss <- rm_OSS_all[rm_OSS_all$SYMBOL %in% genes,c("SYMBOL","logFC")]
+  rm_cocl2 <- rm_CoCl2_all[rm_CoCl2_all$SYMBOL %in% genes,c("SYMBOL","logFC")]
+  rm_oxpapc <- rm_OxPAPC_all[rm_OxPAPC_all$SYMBOL %in% genes,c("SYMBOL","logFC")]
+  rm_il1b <- rm_IL1B_all[rm_IL1B_all$SYMBOL %in% genes,c("SYMBOL","logFC")]
+
+  if(bool_iguara == TRUE){
+    oss_all_iguara <- OSSALL_iguaracy_ALL[OSSALL_iguaracy_ALL$SYMBOL %in% genes,c("SYMBOL","logFC")]
+    genes_exp[,"OSS+ALL Iguaracy"] <- oss_all_iguara[match(rownames(genes_exp),oss_all_iguara$SYMBOL),"logFC"]
+  }
+
+  genes_exp[,"rm OSS"] <- rm_oss[match(rownames(genes_exp),rm_oss$SYMBOL),"logFC"]
+  genes_exp[,"rm OxPAPC"] <- rm_oxpapc[match(rownames(genes_exp),rm_oxpapc$SYMBOL),"logFC"]
+  genes_exp[,"rm CoCl2"] <- rm_cocl2[match(rownames(genes_exp),rm_cocl2$SYMBOL),"logFC"]
+  genes_exp[,"rm IL1B"] <- rm_il1b[match(rownames(genes_exp),rm_il1b$SYMBOL),"logFC"]
+
+  for (i in 1:dim(genes_exp)[1]) {
+    if (rownames(genes_exp)[i] %in% TFs_list) {
+      rownames(genes_exp)[i] <- paste0(rownames(genes_exp)[i],'*')
+    }
+  }
+
+  genes_exp <- as.matrix(genes_exp)
+
+  col_fun  <- colorRamp2(c(-5, 0, 8), c("blue", "white", "red"))
+
+  df_colnames <- as.data.frame((colnames(genes_exp)))
+  colnames(df_colnames)[1]<- "Comparissons"
+
+  ##prepare heatmap plots
+  ##add colnames
+  haTerms_colnames <- HeatmapAnnotation(
+    df = df_colnames,
+    #col = col_fun,
+    Term = anno_text(
+      colnames(genes_exp),
+      rot = 45,
+      just = 'right',
+      gp = gpar(fontsize = 13, fontface = 'bold')),
+    annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+    annotation_name_side = 'left')
+  ##change legend sizes
+  Term = anno_text(
+    colnames(genes_exp),
+    rot = 45,
+    just = 'right',
+    gp = gpar(fontsize = 13, fontface = 'bold'))
+
+  heat_mat_plot <- Heatmap(genes_exp,
+                           name = 'logFC',
+                           col = col_fun,
+                           cluster_rows = T,
+                           cluster_row_slices = F,
+                           show_row_dend = T,
+                           row_title = "Genes",
+                           row_title_side = 'left',
+                           row_title_gp = gpar(fontsize = 11, fontface = 'bold'),
+                           row_title_rot = 90,
+                           show_row_names = T,
+                           row_names_gp = gpar(fontsize = 11, fontface = 'bold'),
+                           row_names_side = 'left',
+                           row_dend_width = unit(20, 'mm'),
+                           cell_fun = function(j, i, x, y, width, height, fill) {
+                              grid.text(sprintf("%.1f", genes_exp[i, j]), x, y, gp = gpar(fontsize = 10))},
+                           cluster_columns = F,
+                           show_column_dend = FALSE,
+                           column_title = title,
+                           column_title_side = 'top',
+                           #column_names_side = "top",
+                           column_title_gp = gpar(fontsize = 13, fontface = 'bold'),
+                           column_title_rot = 0,
+                           show_column_names = TRUE,
+                           show_heatmap_legend = TRUE,
+                           column_names_gp = gpar(fontsize = 8, fontface = 'bold'),
+                           column_names_rot = 45,##change the angle of column name
+
+                           clustering_distance_rows = 'euclidean',
+                           clustering_method_rows = 'ward.D2',
+                           rect_gp = gpar(col = "black", lwd = 0.5),)#,
+
+  heat_mat_plot
+}
+```
+
+```{r fig.height=10, fig.width=5}
+terms <- c("positive regulation of nitric oxide biosynthetic process (GO:0045429)","positive regulation of nitric oxide metabolic process (GO:1904407)","regulation of nitric oxide biosynthetic process (GO:0045428)")
+tiff("images/Dissertação/TIFF/heatmaps_atualizados/HT_no_synthesis.tif", units="in", width=5, height=10, res=600)
+plot_heatmap_for_multiple_pathways(8,terms,"Cluster h - NO synthesis",FALSE)
+dev.off()
+```
+
+<!-- # CIRCOS PLOT -->
+
+<!-- Preparing data -->
+<!-- ```{r} -->
+<!-- # extract clusters data -->
+<!-- circos_data <- groups_path %>%  -->
+<!--   dplyr::select(Pathways, Molecules, cluster_letters) -->
+
+<!-- # Separate genes in rows and create new data frame -->
+<!-- circos_data <- circos_data %>%  -->
+<!--   separate_rows(c(Molecules, cluster_letters), sep = ";") %>% -->
+<!--   separate_rows(c(Molecules, cluster_letters), sep = " ") %>% -->
+<!--   dplyr::select(Pathways, Molecules, cluster_letters)  -->
+
+<!-- # Add FC values for each comparison -->
+
+<!-- OSS_all <- read.csv("tabelas/OSS_vs_LSS_all.csv") -->
+
+<!-- STAT_all <- read.csv("tabelas/STAT_vs_LSS_all.csv") -->
+
+
+
+<!-- circos_data <- circos_data %>%  -->
+<!--   left_join(OSS_all, by = c("Molecules" = "SYMBOL")) %>%  -->
+<!--   dplyr::select(Pathways, Molecules, cluster_letters, logFC) %>%  -->
+<!--   dplyr::rename(OSS = logFC) -->
+
+<!-- circos_data <- circos_data %>%  -->
+<!--   left_join(STAT_all, by = c("Molecules" = "SYMBOL")) %>%  -->
+<!--   dplyr::select(Pathways, Molecules, cluster_letters, OSS, logFC) %>%  -->
+<!--   dplyr::rename(STAT = logFC) -->
+
+
+<!-- ``` -->
+
+<!-- ```{r} -->
+
+<!-- # select cluster of interest -->
+<!-- cluster_b <- circos_data %>%  -->
+<!--   filter(cluster_letters == "b") -->
+
+<!-- # heatmap data -->
+<!-- heat_b <- cluster_b %>%  -->
+<!--   dplyr::select(Molecules, OSS, STAT) -->
+
+<!-- rownames(heat_b) <- NULL -->
+<!-- heat_b <- subset(heat_b, !duplicated(Molecules)) -->
+
+<!-- heat_b <- heat_b %>%  -->
+<!--   tibble::column_to_rownames(var = "Molecules") %>%  -->
+<!--   as.matrix() -->
+
+
+<!-- # select cluster of interest -->
+<!-- cluster_r <- circos_data %>%  -->
+<!--   filter(cluster_letters == "r") -->
+
+<!-- # heatmap data -->
+<!-- heat_r <- cluster_r %>%  -->
+<!--   dplyr::select(Molecules, OSS, STAT) -->
+
+<!-- rownames(heat_r) <- NULL -->
+<!-- heat_r <- subset(heat_r, !duplicated(Molecules)) -->
+
+<!-- heat_r <- heat_r %>%  -->
+<!--   tibble::column_to_rownames(var = "Molecules") %>%  -->
+<!--   as.matrix() -->
+
+
+<!-- ``` -->
+
+<!-- ploting heatmaps -->
+<!-- ```{r} -->
+<!-- # color -->
+<!-- col_fun  <- colorRamp2(c(-6, 0, 6), c("darkblue", "white", "indianred")) -->
+
+
+<!-- #change legend sizes -->
+<!--  Term = anno_text( -->
+<!--    colnames(heat_b), -->
+<!--    rot = 45, -->
+<!--    just = 'right', -->
+<!--    gp = gpar(fontsize = 13, fontface = 'bold')) -->
+
+<!-- heatmap_b <- Heatmap(heat_b, -->
+<!--                     name = 'Log2FC', -->
+<!--                     col = col_fun, -->
+<!--                     cluster_rows = TRUE, -->
+<!--                     cluster_row_slices = T, -->
+<!--                     show_row_dend = TRUE, -->
+<!--                     row_title = 'Cluster b', -->
+<!--                     row_title_side = 'left', -->
+<!--                     row_title_gp = gpar(fontsize = 11, fontface = 'bold'), -->
+<!--                     row_title_rot = 90, -->
+<!--                     show_row_names = TRUE, -->
+<!--                     row_names_gp = gpar(fontsize = 11, fontface = 'bold'), -->
+<!--                     row_names_side = 'left', -->
+<!--                     row_dend_width = unit(20, 'mm'), -->
+
+<!--                     cluster_columns = F, -->
+<!--                     show_column_dend = TRUE, -->
+<!--                     column_title = 'Cluster b', -->
+<!--                     column_title_side = 'top', -->
+<!--                     column_title_gp = gpar(fontsize = 13, fontface = 'bold'), -->
+<!--                     column_title_rot = 0, -->
+<!--                     show_column_names = TRUE, -->
+<!--                     show_heatmap_legend = TRUE, -->
+<!--                     column_names_gp = gpar(fontsize = 8, fontface = 'bold'), -->
+<!--                     column_names_rot = 45,#change the angle of column name -->
+
+<!--                     clustering_distance_rows = 'euclidean', -->
+<!--                     clustering_method_rows = 'ward.D2', -->
+<!--                     cell_fun = function(j, i, x, y, width, height, fill) { -->
+<!--                     grid.text(sprintf("%.1f", heat_b[i, j]), x, y, gp = gpar(fontsize = 10)) -->
+<!--  }) -->
+
+
+<!-- #change legend sizes -->
+<!--  Term = anno_text( -->
+<!--    colnames(heat_r), -->
+<!--    rot = 45, -->
+<!--    just = 'right', -->
+<!--    gp = gpar(fontsize = 13, fontface = 'bold')) -->
+
+<!-- heatmap_r <- Heatmap(heat_r, -->
+<!--                     name = 'Log2FC', -->
+<!--                     col = col_fun, -->
+<!--                     cluster_rows = TRUE, -->
+<!--                     cluster_row_slices = T, -->
+<!--                     show_row_dend = TRUE, -->
+<!--                     row_title = 'Cluster f', -->
+<!--                     row_title_side = 'left', -->
+<!--                     row_title_gp = gpar(fontsize = 11, fontface = 'bold'), -->
+<!--                     row_title_rot = 90, -->
+<!--                     show_row_names = TRUE, -->
+<!--                     row_names_gp = gpar(fontsize = 11, fontface = 'bold'), -->
+<!--                     row_names_side = 'left', -->
+<!--                     row_dend_width = unit(20, 'mm'), -->
+
+<!--                     cluster_columns = F, -->
+<!--                     show_column_dend = TRUE, -->
+<!--                     column_title = 'Cluster f', -->
+<!--                     column_title_side = 'top', -->
+<!--                     column_title_gp = gpar(fontsize = 13, fontface = 'bold'), -->
+<!--                     column_title_rot = 0, -->
+<!--                     show_column_names = TRUE, -->
+<!--                     show_heatmap_legend = TRUE, -->
+<!--                     column_names_gp = gpar(fontsize = 8, fontface = 'bold'), -->
+<!--                     column_names_rot = 45,#change the angle of column name -->
+
+<!--                     clustering_distance_rows = 'euclidean', -->
+<!--                     clustering_method_rows = 'ward.D2', -->
+<!--                     cell_fun = function(j, i, x, y, width, height, fill) { -->
+<!--                     grid.text(sprintf("%.1f", heat_r[i, j]), x, y, gp = gpar(fontsize = 10)) -->
+<!--  }) -->
+
+
+
+<!-- ht_list = heatmap_b %v% heatmap_r  -->
+
+<!-- png(file = "Enrichment/Enrichr/cluster_heats.png", width = 6, height = 18, units = "in",res = 300) -->
+<!-- ht_list -->
+<!-- dev.off() -->
+<!-- ``` -->

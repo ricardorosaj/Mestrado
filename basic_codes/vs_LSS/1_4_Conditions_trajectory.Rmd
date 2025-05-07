@@ -1,0 +1,136 @@
+---
+title: "Conditions Trajectory"
+author: "Ricardo Rosa Junior"
+date: '2022-07-07'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, warning=FALSE, message=FALSE}
+library(SingleCellExperiment)
+library(readr)
+library(slingshot)
+library(RColorBrewer)
+library(clariomdhumantranscriptcluster.db)
+library(tradeSeq)
+library(uwot)
+```
+
+Read necessary tables for analysis and create SingleCellExperiment
+
+```{r}
+sce_counts <- read.csv("array.norm.filtered.nomapping_without_LSS.csv")
+rownames(sce_counts) <- sce_counts$Genes
+sce_counts$Genes <- NULL
+
+sce_annotation <- read.csv("pheno_without_LSS.csv")
+sce_pheno <- sce_annotation
+sce_annotation$Samples <- NULL
+sce_annotation$Conditions <- NULL
+
+colnames(sce_counts) <- sce_annotation$Samples_name
+
+sce <- SingleCellExperiment(
+  assays = list(counts = as.matrix(sce_counts)),
+)
+
+annot.clariom.sce <- AnnotationDbi::select(clariomdhumantranscriptcluster.db,
+                                       keys = rownames(sce),
+                                       columns = c("SYMBOL", "GENENAME"),
+                                       keytype = "PROBEID")
+annotation_clariom_sce <- subset(annot.clariom.sce, !is.na(SYMBOL))
+annotation_clariom_sce <- annotation_clariom_sce[!duplicated(annotation_clariom_sce$SYMBOL),]
+
+rownames(sce) <- annotation_clariom_sce[match(rownames(sce), annotation_clariom_sce$PROBEID),]$SYMBOL
+colData(sce)$pheno <- sce_pheno
+
+```
+
+Creating Slingshot object
+
+```{r}
+pca <- prcomp(t(log2(assays(sce)$counts)), scale. = FALSE)
+rd1 <- pca$x[,1:2]
+reducedDims(sce) <- SimpleList(PCA = rd1)
+cl1 <- rep(1:6, each = 4)
+names(cl1) <- rownames(rd1)
+
+rd2 <- uwot::umap(base::t(log1p(assays(sce)$counts)))
+colnames(rd2) <- c('UMAP1', 'UMAP2')
+
+reducedDims(sce) <- SimpleList(PCA = rd1, UMAP = rd2)
+                               
+sce_PCA <- slingshot(sce, cl1, reducedDim = 'PCA')
+sce_UMAP <- slingshot(sce, cl1, reducedDim = 'UMAP')
+
+```
+
+## Identify temporarily dynamic genes
+
+```{r}
+# fit negative binomial GAM
+sce_genes <- fitGAM(sce_PCA)
+
+# test for dynamic expression
+ATres <- associationTest(sce_genes)
+
+topgenes <- rownames(ATres[order(ATres$pvalue), ])[1:250] #top 250 most variable genes
+pst.ord <- order(sce_genes$slingPseudotime_1, na.last = NA)
+heatdata <- assays(sce_genes)$counts[topgenes, pst.ord]
+```
+
+Plot heatmap
+
+```{r fig.height=12, fig.width=10}
+cols <- c("#8DA0CB", "#8DA0CB", "#8DA0CB", "#8DA0CB",
+          "#66C2A5", "#66C2A5", "#66C2A5", "#66C2A5",
+          "#FC8D62", "#FC8D62", "#FC8D62", "#FC8D62",
+          "#A6D854", "#A6D854", "#A6D854", "#A6D854",
+          "#E78AC3", "#E78AC3", "#E78AC3", "#E78AC3")
+
+heatmap(log1p(heatdata), Colv = NA,
+        ColSideColors = cols)
+# legend(x = 'top', legend = c("OSS_OxPAPC_CoCl2_rm_IL1B","OSS_ALL_72h","LSS_ALL","OSS_IL1B_OxPAPC_rm_CoCl2"),
+#        fill = c("#8DA0CB","#66C2A5","#FC8D62","#E78AC3"))
+```
+
+## Plot lineage structure
+
+```{r}
+#Plot lineage structure
+
+#PCA
+colors <- rep(brewer.pal(6,'Set2'), each = 4)
+plot(reducedDims(sce_PCA)$PCA, col = colors, pch=16, asp = 1)
+lines(SlingshotDataSet(sce_PCA), lwd=2, col='black')
+legend(x='topright', legend = c("OSS_OxPAPC_CoCl2_rm_IL1B","OSS_ALL_72h","LSS_ALL","OSS_IL1B_OxPAPC_rm_CoCl2", "OSS_IL1B_CoCl2_rm_OxPAPC","LSS_pure"),
+       fill = c("#8DA0CB","#66C2A5","#FC8D62","#A6D854","#E78AC3","#FFD92F"), cex = 0.8)
+                
+#UMAP
+colors <- rep(brewer.pal(6,'Set2'), each = 4)
+plot(reducedDims(sce_UMAP)$UMAP, col = colors, pch=16, asp = 1)
+lines(SlingshotDataSet(sce_UMAP), lwd=2, col='black')
+legend(x='topright', legend = c("OSS_OxPAPC_CoCl2_rm_IL1B","OSS_ALL_72h","LSS_ALL","OSS_IL1B_OxPAPC_rm_CoCl2", "OSS_IL1B_CoCl2_rm_OxPAPC", "LSS_pure"),
+       fill = c("#8DA0CB","#66C2A5","#FC8D62","#A6D854","#E78AC3","#FFD92F"), cex = 0.8)
+```
+
+## Plot lineage structure with start and end points
+
+```{r}
+lin2_PCA <- getLineages(rd1, cl1, start.clus= '1')
+lin2_UMAP <- getLineages(rd2, cl1, start.clus= '1')
+
+plot(rd1, col = colors, asp = 1, pch = 16)
+lines(SlingshotDataSet(lin2_PCA), lwd = 2, col = 'black', show.constraints = TRUE)
+legend(x='topright', legend = c("OSS_OxPAPC_CoCl2_rm_IL1B","OSS_ALL_72h","LSS_ALL","OSS_IL1B_OxPAPC_rm_CoCl2", "OSS_IL1B_CoCl2_rm_OxPAPC","LSS_pure"),
+       fill = c("#8DA0CB","#66C2A5","#FC8D62","#A6D854","#E78AC3","#FFD92F"), cex = 0.8)
+
+plot(rd2, col = colors, asp = 1, pch = 16)
+lines(SlingshotDataSet(lin2_UMAP), lwd = 2, col = 'black', show.constraints = TRUE)
+legend(x='topright', legend = c("OSS_OxPAPC_CoCl2_rm_IL1B","OSS_ALL_72h","LSS_ALL","OSS_IL1B_OxPAPC_rm_CoCl2", "OSS_IL1B_CoCl2_rm_OxPAPC","LSS_pure"),
+       fill = c("#8DA0CB","#66C2A5","#FC8D62","#A6D854","#E78AC3","#FFD92F"), cex = 0.8)
+```
+
